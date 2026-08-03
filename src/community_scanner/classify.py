@@ -1,16 +1,38 @@
 from __future__ import annotations
 
+from community_scanner.etalons import match_etalon
 from community_scanner.models import AccessStatus, ExtractedCommunity, Platform, ValueTier
 
 
 def classify(item: ExtractedCommunity) -> ExtractedCommunity:
-    """Assign access_status refinements + value_score/tier."""
+    """Assign access_status refinements + value_score/tier.
+
+    Warmr gold etalons (Hampton, Ramen Club, Chief, ...) force high tier.
+    """
     score = 0
     signals: dict = dict(item.raw_signals)
 
     if item.access_status == AccessStatus.REJECT:
         item.value_score = 0
         item.value_tier = ValueTier.JUNK
+        return item
+
+    etalon = match_etalon(item.name, item.website, item.platform_id)
+    if etalon:
+        signals["warmr_gold_etalon"] = etalon.get("name")
+        signals["warmr_tier"] = etalon.get("tier")
+        if etalon.get("entry_cost"):
+            item.price_amount = float(etalon["entry_cost"])
+            item.currency = "USD"
+            item.price_text = f"etalon entry_cost={etalon['entry_cost']}"
+        if etalon.get("is_paid_membership"):
+            item.is_professional = True
+        # Known valuable inventory — keep as high regardless of thin public page
+        item.value_score = max(85, int(min(100, 70 + (etalon.get("lead_price_base") or 0) / 20)))
+        item.value_tier = ValueTier.HIGH
+        if item.access_status == AccessStatus.WATCH and (etalon.get("join_link") or item.join_url):
+            item.access_status = AccessStatus.APPLY if etalon.get("visibility") == "private" else AccessStatus.JOIN
+        item.raw_signals = signals
         return item
 
     # Weak pages / missing identity
@@ -25,24 +47,51 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
     if item.price_amount and item.price_amount > 0:
         score += 25
         signals["paid"] = True
+        # Warmr-like: higher entry cost ≈ higher lead value potential
+        if item.price_amount >= 1000:
+            score += 20
+            signals["high_ticket"] = True
+        elif item.price_amount >= 100:
+            score += 10
     if item.size_members:
         if item.size_members >= 1000:
-            score += 25
+            score += 20
         elif item.size_members >= 200:
-            score += 15
+            score += 12
         elif item.size_members >= 50:
-            score += 8
+            score += 6
         else:
             score -= 10
             signals["too_small"] = True
     if item.is_professional:
-        score += 20
+        score += 15
     if item.platform in {Platform.SKOOL, Platform.CIRCLE, Platform.DISCORD, Platform.SLACK}:
-        score += 10
+        score += 12
+        if item.platform == Platform.SLACK:
+            score += 8
+            signals["slack_bonus"] = True
     if item.access_status in {AccessStatus.JOIN, AccessStatus.APPLY}:
         score += 10
     if item.join_url:
         score += 5
+
+    # Founder / agency / paid-community language
+    blob = " ".join(
+        filter(
+            None,
+            [
+                item.name,
+                item.website,
+                item.niche,
+                item.audience,
+                str(item.raw_signals),
+            ],
+        )
+    ).lower()
+    for token in ("founder", "agency", "saas", "ceo", "operator", "membership", "paid community"):
+        if token in blob:
+            score += 4
+            signals.setdefault("keywords", []).append(token)
 
     score = max(0, min(100, score))
 
@@ -55,7 +104,6 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
     else:
         tier = ValueTier.JUNK
 
-    # Keep Watch when we lack join/apply clarity
     if item.access_status not in {AccessStatus.JOIN, AccessStatus.APPLY, AccessStatus.REJECT}:
         if tier in {ValueTier.HIGH, ValueTier.MEDIUM} and not item.join_url:
             item.access_status = AccessStatus.WATCH

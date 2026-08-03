@@ -1,48 +1,76 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from community_scanner.discovery.base import DiscoveryProvider
+from community_scanner.etalons import etalon_seed_entries
 from community_scanner.models import DiscoveryHit
 
-# High-signal seed URLs for smoke / bootstrap. Replace/extend from Warmr ops.
+ROOT = Path(__file__).resolve().parents[3]
+SEEDS_PATH = ROOT / "data" / "seeds.json"
+
+# Fallback if seeds.json missing
 DEFAULT_SEEDS: list[tuple[str, str, str]] = [
-    (
-        "https://www.skool.com/discovery",
-        "Skool discovery",
-        "community skool accounting business",
-    ),
-    (
-        "https://www.indiehackers.com/",
-        "Indie Hackers",
-        "entrepreneur community founders",
-    ),
-    (
-        "https://www.producthunt.com/",
-        "Product Hunt",
-        "startup makers community",
-    ),
+    ("https://www.skool.com/discovery", "Skool Discovery", "community skool business"),
+    ("https://www.indiehackers.com/", "Indie Hackers", "entrepreneur community founders"),
+    ("https://www.flicpa.org/", "Florida Institute of CPAs", "florida accounting CPA community"),
 ]
+
+
+def load_seeds() -> list[tuple[str, str, str]]:
+    rows: list[tuple[str, str, str]] = []
+    seen: set[str] = set()
+
+    # Warmr gold etalons first
+    for item in etalon_seed_entries():
+        url = item["url"]
+        if url in seen:
+            continue
+        seen.add(url)
+        rows.append((url, item.get("title") or url, item.get("tags") or "warmr-gold"))
+
+    if SEEDS_PATH.exists():
+        raw = json.loads(SEEDS_PATH.read_text(encoding="utf-8"))
+        for item in raw:
+            url = item["url"]
+            if url in seen:
+                continue
+            seen.add(url)
+            rows.append((url, item.get("title") or url, item.get("tags") or ""))
+        return rows
+    if rows:
+        return rows
+    return DEFAULT_SEEDS
 
 
 class SeedsProvider(DiscoveryProvider):
     name = "seeds"
 
     def __init__(self, seeds: list[tuple[str, str, str]] | None = None) -> None:
-        self.seeds = seeds or DEFAULT_SEEDS
+        self.seeds = seeds or load_seeds()
 
     def search(self, query: str, count: int = 10) -> list[DiscoveryHit]:
-        q = query.lower()
-        hits: list[DiscoveryHit] = []
-        for url, title, tag in self.seeds:
-            if any(token in tag or token in title.lower() for token in q.split() if len(token) > 3):
-                hits.append(
-                    DiscoveryHit(url=url, title=title, snippet=tag, provider=self.name, query=query)
-                )
-            if len(hits) >= count:
-                break
-        # If nothing matched, still return a few seeds so local smoke works
-        if not hits:
-            for url, title, tag in self.seeds[: min(count, 3)]:
-                hits.append(
-                    DiscoveryHit(url=url, title=title, snippet=tag, provider=self.name, query=query)
-                )
-        return hits
+        q_tokens = [t for t in query.lower().split() if len(t) > 2]
+        scored: list[tuple[int, tuple[str, str, str]]] = []
+
+        for seed in self.seeds:
+            url, title, tag = seed
+            blob = f"{title} {tag} {url}".lower()
+            score = sum(1 for t in q_tokens if t in blob)
+            scored.append((score, seed))
+
+        scored.sort(key=lambda x: (-x[0], x[1][1]))
+        # Prefer matches; if weak match, still return top of list so runs stay useful
+        chosen = [s for sc, s in scored if sc > 0][:count]
+        if len(chosen) < count:
+            for _, seed in scored:
+                if seed not in chosen:
+                    chosen.append(seed)
+                if len(chosen) >= count:
+                    break
+
+        return [
+            DiscoveryHit(url=url, title=title, snippet=tag, provider=self.name, query=query)
+            for url, title, tag in chosen
+        ]

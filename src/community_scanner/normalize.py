@@ -13,7 +13,6 @@ BLOCKED_DOMAINS = {
     "youtu.be",
     "amazon.com",
     "wikipedia.org",
-    "reddit.com",
     "x.com",
     "twitter.com",
     "instagram.com",

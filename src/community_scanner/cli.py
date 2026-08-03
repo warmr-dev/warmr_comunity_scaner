@@ -66,7 +66,7 @@ def cmd_list(args: argparse.Namespace) -> None:
         }
         for r in rows
     ]
-    print(json.dumps({"count": len(payload), "communities": payload}, indent=2, ensure_ascii=False))
+    print(json.dumps({"count": len(payload), "communities": payload}, indent=2, ensure_ascii=True))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -81,8 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_disc.add_argument("--geo", default="Florida")
     p_disc.add_argument("--audience", default="CPAs")
     p_disc.add_argument("--queries", type=int, default=5)
-    p_disc.add_argument("--per-query", type=int, default=5)
-    p_disc.add_argument("--max-fetch", type=int, default=20)
+    p_disc.add_argument("--per-query", type=int, default=10)
+    p_disc.add_argument("--max-fetch", type=int, default=40)
     p_disc.add_argument("--llm", action="store_true", help="Force LLM extract pass")
     p_disc.set_defaults(func=cmd_discover)
 
