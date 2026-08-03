@@ -23,6 +23,14 @@
 
 Значит интеграция = аккуратно **добавлять/обновлять** записи в существующий inventory, а не плодить параллельную «истину».
 
+## Куда пишем данные (решение команды)
+
+1. Сканер **обрабатывает** кандидатов у себя (normalize → parse → classify → value).
+2. В **БД Warmr** уходит уже очищенный upsert (new/changed, valuable).
+3. Сырой SERP/HTML в Warmr не льём.
+
+См. также `hosting.md` (Docker, не Edge).
+
 ## Принцип интеграции
 
 ```text
@@ -43,10 +51,12 @@ Warmr Communities Inventory  ──► monitoring bots ──► intent leads �
 ```json
 {
   "external_id": "uuid-from-scanner",
-  "canonical_domain": "example.com",
-  "website": "https://example.com",
+  "canonical_domain": "skool.com",
+  "platform": "skool",
+  "platform_id": "florida-cpa",
+  "canonical_key": "skool:florida-cpa",
+  "website": "https://www.skool.com/florida-cpa",
   "name": "Florida Accountants Network",
-  "platform": "circle",
   "niche": "accounting",
   "audience": "CPAs and bookkeepers",
   "geo": "Florida, US",
@@ -78,8 +88,8 @@ Warmr Communities Inventory  ──► monitoring bots ──► intent leads �
 
 Чтобы не засорять базу:
 
-- upsert по `canonical_domain` (или по Warmr community id, если уже смапили)
-- не создавать дубль, если домен уже есть в 80k
+- upsert по `canonical_key` (не только domain)
+- не создавать дубль, если community уже есть в 80k
 - scanner хранит `sync_status` / `synced_at`
 - повторный weekly run безопасен
 

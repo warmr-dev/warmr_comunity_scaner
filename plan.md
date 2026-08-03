@@ -25,11 +25,12 @@
 
 | Слой | Выбор |
 |------|--------|
-| Language | Python 3.12+ |
+| Language | Python 3.10+ (лучше 3.12+) |
 | Discovery primary | Directories/seeds + **Brave Search API** |
 | Discovery secondary / cheap | SearXNG (overflow/dev), платный SERP API при необходимости |
 | Crawl | Scrapy + Playwright (точечно) |
-| DB | PostgreSQL |
+| DB | PostgreSQL (сканер) → sync в Warmr DB после обработки |
+| Runtime | **Docker** на **Railway / Render** (не Edge, VPS не обязателен) |
 | Jobs | Redis + ARQ/Celery |
 | Deploy | Docker Compose |
 
@@ -44,6 +45,7 @@
 |----------|------------|
 | [docs/research.md](docs/research.md) | Ресерч, продуктовый контекст, решения |
 | [docs/risks-and-strategy.md](docs/risks-and-strategy.md) | Риски, альтернативы, revised стратегия |
+| [docs/hosting.md](docs/hosting.md) | Docker vs Edge, частота прогонов, куда деплоить |
 | [docs/stack.md](docs/stack.md) | Стек и зависимости |
 | [docs/architecture.md](docs/architecture.md) | Архитектура, схема данных, классификация |
 | [docs/integration.md](docs/integration.md) | Интеграция в текущую экосистему Warmr |
@@ -56,7 +58,8 @@
 - [x] Архитектура и план действий описаны
 - [x] Контракт интеграции с экосистемой описан
 - [ ] Согласование с владельцем экосистемы (лёгкость синка)
-- [ ] Старт реализации (Фаза 1 — каркас)
+- [x] Учтены: platform_id dedupe, LLM extract, hosting Docker, sync в Warmr DB после обработки
+- [ ] Старт реализации (Фаза 1 — каркас) — in progress
 
 ## Полезные ссылки
 

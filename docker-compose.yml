@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: scanner
+      POSTGRES_DB: community_scanner
+    ports:
+      - "5432:5432"
+    volumes:
+      - scanner_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner -d community_scanner"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  searxng:
+    image: searxng/searxng:latest
+    profiles: ["searxng"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/searxng:/etc/searxng:ro
+    environment:
+      SEARXNG_BASE_URL: http://localhost:8080/
+
+volumes:
+  scanner_pg:

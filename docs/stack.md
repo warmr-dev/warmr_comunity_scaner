@@ -4,7 +4,7 @@
 
 | Слой | Технология | Почему |
 |------|------------|--------|
-| Language | **Python 3.12+** | Лучшая экосистема Scrapy/Playwright, быстрый delivery |
+| Language | **Python 3.10+** (предпочтительно 3.12+) | Лучшая экосистема Scrapy/Playwright, быстрый delivery |
 | Discovery primary | **Directories/seeds + Brave Search API** | Высокий signal + стабильный официальный search API |
 | Discovery overflow/dev | **SearXNG** (Docker) | Дешёвый bulk/local; не single point of failure |
 | HTTP crawl | **Scrapy** | Масштаб, pipelines, concurrency, middleware |
@@ -16,20 +16,19 @@
 | Config | `.env` + pydantic-settings | Секреты и параметры окружения |
 | Containers | **Docker Compose** | SearXNG + Postgres + Redis + worker |
 | Export | gspread / Airtable API | Витрины, не primary storage |
-| Optional LLM | OpenAI-compatible API | Niche/audience/value на сложных страницах |
+| Optional LLM | **gpt-4o-mini / claude-3-5-haiku** | Structured JSON extract для Watch/medium и слабых price/size |
+| Hosting | **Docker** на **Railway / Render** | Решение команды; VPS не обязателен; см. `hosting.md` |
 
 ## Пакеты (ориентир)
 
 ```text
-scrapy
-scrapy-playwright
-playwright
+openai           # или anthropic — light LLM extract
 httpx
 sqlalchemy
 alembic
 psycopg[binary]
 redis
-arq          # или celery + redis
+arq
 pydantic
 pydantic-settings
 python-dotenv
@@ -38,6 +37,9 @@ beautifulsoup4
 lxml
 gspread      # optional export
 pyairtable   # optional export
+scrapy
+scrapy-playwright
+playwright
 ```
 
 ## Что сознательно не берём в основу
@@ -49,6 +51,7 @@ pyairtable   # optional export
 | Playwright на 100% трафика | Дорого на сотнях тысяч URL |
 | Sheets/Airtable как единственная БД | Не выдержит путь к 1M |
 | Публичные SearXNG инстансы в проде | JSON часто выключен, rate-limit, нестабильность |
+| Edge functions как runtime сканера | Timeout/memory; нет нормального Scrapy/Playwright/Redis |
 | Selenium | Playwright достаточно и обычно удобнее |
 
 ## Окружения

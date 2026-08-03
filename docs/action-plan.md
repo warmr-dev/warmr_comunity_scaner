@@ -25,12 +25,15 @@
 
 ## Фаза 1 — Каркас репо (1–2 дня)
 
-- [ ] Структура проекта Python (`src/community_scanner/...`)
-- [ ] `pyproject.toml` / dependencies
-- [ ] Docker Compose: Postgres + Redis (+ optional SearXNG)
-- [ ] Settings через `.env.example` (в т.ч. Brave API key)
-- [ ] Alembic + таблица `communities` / `pipeline_runs`
-- [ ] README с запуском local
+- [x] Структура проекта Python (`src/community_scanner/...`)
+- [x] `pyproject.toml` / dependencies
+- [x] Docker Compose: Postgres + Redis (+ optional SearXNG)
+- [x] Settings через `.env.example` (в т.ч. Brave API key)
+- [x] Таблицы через `init-db` (+ alembic placeholder)
+- [x] README с запуском local
+- [x] platform_id / canonical_key normalize + tests
+- [x] LLM extract hook + sync dry-run adapter
+- [x] docs/hosting.md (Docker vs Edge, частота, Warmr DB)
 
 **Результат:** `docker compose up` поднимает инфраструктуру, приложение коннектится к БД.
 

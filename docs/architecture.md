@@ -59,10 +59,12 @@
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `id` | uuid | PK |
-| `canonical_domain` | text | ключ дедупа №1 |
+| `canonical_key` | text | **уникальный ключ дедупа** (см. ниже) |
+| `canonical_domain` | text | host без www |
+| `platform_id` | text | slug / invite code / path id на shared platforms |
 | `website` | text | основной URL |
 | `name` | text | название |
-| `platform` | text | circle / discord / slack / custom / ... |
+| `platform` | text | circle / discord / skool / slack / telegram / custom / ... |
 | `niche` | text | ниша |
 | `audience` | text | аудитория (если извлекли) |
 | `geo` | text | гео, если есть |
@@ -86,7 +88,30 @@
 | `sync_status` | enum | pending / synced / error |
 | `synced_at` | timestamptz | |
 
-Уникальность: `(canonical_domain)` или `(canonical_domain, platform_id)` если известен внешний id.
+Уникальность: **`canonical_key`** (unique index).
+
+### Правило `canonical_key` (критично)
+
+Дедуп **только по `canonical_domain` недостаточен**:
+
+- свои сайты (`accounting-club.com`) → `canonical_key = domain`
+- shared platforms (`discord.gg`, `skool.com`, `circle.so`, `t.me`, …) → много разных комьюнити на одном домене
+
+Для platform-hosts:
+
+```text
+canonical_key = "{platform}:{platform_id}"
+```
+
+Примеры:
+
+- `discord:AbCdEf` из `https://discord.gg/AbCdEf`
+- `skool:florida-cpa` из `https://www.skool.com/florida-cpa`
+- `circle:accounting-leaders` из circle community slug
+- `telegram:florida_accountants` из `https://t.me/florida_accountants`
+- custom site → `site:accounting-club.com`
+
+`normalize` обязан извлекать `platform` + `platform_id` (slug/invite), иначе разные комьюнити схлопнутся в один дубль.
 
 ### `discovery_results`
 
@@ -99,9 +124,11 @@
 ## Дедуп
 
 1. Нормализация URL → scheme/host/path cleanup.
-2. `canonical_domain` без `www.`
-3. Blocklist: google/facebook/linkedin/youtube/amazon и прочие non-community хабы (расширяемый список).
-4. Если один и тот же Discord/Slack invite встречается с разных лендингов — склеивать по `platform_id`, когда доступен.
+2. Определить `platform` по host.
+3. Извлечь `platform_id` (slug/invite/code) для shared platforms.
+4. Построить `canonical_key` (domain **или** `platform:id`).
+5. Blocklist junk hosts (google, youtube, amazon, …). LinkedIn/Facebook groups — не primary MVP source (walled garden), но домены не использовать как «одно комьюнити».
+6. Перед sync в Warmr — match по `canonical_key` / domain+platform_id против существующего inventory.
 
 ## Incremental update
 
@@ -147,7 +174,38 @@ Reject и junk можно хранить локально (чтобы не на�
 - thin page / parked domain
 - known low-quality patterns
 
-LLM — опциональный второй проход для Watch и спорных medium.
+### Extract: regex vs LLM
+
+Regex/heuristics по сырому HTML для `price_amount` / `size_members` **часто врут** (путают цену подписки с годом основания, «$50» из другого блока и т.п.).
+
+Пайплайн экстракции:
+
+1. **Rules / CSS / platform parsers** — быстрый первый проход (особенно Skool/Discord/Circle шаблоны).
+2. Если страница `Watch` или `value_tier=medium` / поля price|size пустые или низкая уверенность → **light LLM** (`gpt-4o-mini` или `claude-3-5-haiku`).
+3. LLM возвращает строгий JSON:
+
+```json
+{
+  "price": 49,
+  "currency": "USD",
+  "members_count": 1200,
+  "is_professional": true,
+  "join_type": "join|apply|unknown",
+  "confidence": 0.0
+}
+```
+
+LLM не гоняем на 100% URL — только на спорные/неполные, иначе дорого на масштабе.
+
+### Walled gardens (post-MVP)
+
+Scrapy/Playwright закрывают **публичный web**.  
+Для цели ~1M хороших позже понадобятся отдельные connectors:
+
+- Telegram API / MTProto (каналы/чаты)
+- LinkedIn / Facebook groups — отдельная стратегия доступа (часто без публичного лендинга)
+
+В MVP они **out of scope**, но в roadmap обязательны; иначе потолок inventory будет ниже цели.
 
 ## Observability
 

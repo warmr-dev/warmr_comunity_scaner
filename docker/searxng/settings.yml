@@ -1,0 +1,20 @@
+# Community Scanner
+
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  limiter: false
+  image_proxy: false
+
+engines:
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: bing
+    disabled: false
