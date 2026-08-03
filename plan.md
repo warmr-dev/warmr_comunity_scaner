@@ -1,26 +1,71 @@
-Нужно разработать систему для автоматического поиска и сбора данных о профессиональных сообществах.
+# Warmr Community Scanner — Plan
 
-Что система делает:
+Система автоматического поиска и сбора **ценных professional communities** для пополнения inventory Warmr.
 
-Генерирует сотни поисковых запросов по заданным параметрам: география, ниша, аудитория, тип сообщества.
-Получает результаты поисковой выдачи, находит сайты потенциальных сообществ.
-Парсит публичные страницы и собирает: название, сайт, нишу, аудиторию, ссылку на вступление, цену, размер и контакты.
-Удаляет дубли и нерелевантные результаты.
-Классифицирует сообщества: Join, Apply, Watch, Reject.
-Выгружает чистые данные в Google Sheets, Airtable или базу данных.
-Запускается регулярно и добавляет только новые/изменённые сообщества.
+> Vendors платят за лиды. Боты мониторят комьюнити и ловят intent-посты.  
+> Этот тул нужен, чтобы **находить больше качественных комьюнити** (сейчас ~20k ценных из ~80k; цель — порядка 1M хороших).
 
+## Что делает система
 
-Ключевое ограничение: не строить решение на прямом массовом скрейпинге Google.
-Поиск использовать для discovery через API и/или SearXNG, а основной парсинг выполнять по публичным сайтам найденных сообществ.
+1. Генерирует сотни поисковых запросов (гео, ниша, аудитория, тип).
+2. Делает discovery через **SearXNG API** (не через массовый скрейпинг Google SERP).
+3. Парсит публичные страницы найденных сообществ (**Scrapy + Playwright fallback**).
+4. Собирает: название, сайт, нишу, аудиторию, join-ссылку, цену, размер, контакты.
+5. Удаляет дубли и нерелевантное.
+6. Классифицирует: **Join / Apply / Watch / Reject** + **value_tier** (ценность для лидов).
+7. Пишет в **Postgres**, выгружает в Sheets/Airtable, синкает new/changed в экосистему Warmr.
+8. Запускается регулярно.
 
-Полезные ссылки:
+## Ключевое ограничение
 
-SearXNG - GitHub
-SearXNG - документация
-Google Custom Search JSON API
-Playwright
-Scrapy
+Не строить решение на прямом массовом скрейпинге Google.  
+Поиск — discovery через API/SearXNG; основной парсинг — по публичным сайтам сообществ.
 
+## Зафиксированный стек (кратко)
 
-Ожидаемый результат: поддерживаемый pipeline, который еженедельно находит тысячи уникальных релевантных сообществ с минимальной ручной проверкой.playwright.devFast and reliable end-to-end testing for modern web apps | PlaywrightWeb automation and testing for apps, scripts, and AI agentsScrapyScrapy — open source web scraping framework for PythonScrapy is the leading open source Python framework for web scraping — fast, asynchronous, extensible, and BSD-licensed. Trusted by millions of developers.
+| Слой | Выбор |
+|------|--------|
+| Language | Python 3.12+ |
+| Discovery primary | Directories/seeds + **Brave Search API** |
+| Discovery secondary / cheap | SearXNG (overflow/dev), платный SERP API при необходимости |
+| Crawl | Scrapy + Playwright (точечно) |
+| DB | PostgreSQL |
+| Jobs | Redis + ARQ/Celery |
+| Deploy | Docker Compose |
+
+> Важно: путь «только SearXNG → весь интернет» **не** самый оптимальный для цели 1M ценных.  
+> См. [docs/risks-and-strategy.md](docs/risks-and-strategy.md).
+
+Подробности: [docs/stack.md](docs/stack.md)
+
+## Документация
+
+| Документ | Содержание |
+|----------|------------|
+| [docs/research.md](docs/research.md) | Ресерч, продуктовый контекст, решения |
+| [docs/risks-and-strategy.md](docs/risks-and-strategy.md) | Риски, альтернативы, revised стратегия |
+| [docs/stack.md](docs/stack.md) | Стек и зависимости |
+| [docs/architecture.md](docs/architecture.md) | Архитектура, схема данных, классификация |
+| [docs/integration.md](docs/integration.md) | Интеграция в текущую экосистему Warmr |
+| [docs/action-plan.md](docs/action-plan.md) | План реализации по фазам |
+
+## Статус
+
+- [x] Ресерч и выводы записаны в docs
+- [x] Стек выбран
+- [x] Архитектура и план действий описаны
+- [x] Контракт интеграции с экосистемой описан
+- [ ] Согласование с владельцем экосистемы (лёгкость синка)
+- [ ] Старт реализации (Фаза 1 — каркас)
+
+## Полезные ссылки
+
+- [SearXNG GitHub](https://github.com/searxng/searxng)
+- [SearXNG Search API](https://docs.searxng.org/dev/search_api.html)
+- [Google Custom Search JSON API](https://developers.google.com/custom-search/v1/overview) (не foundation: closed for new / sunset 2027)
+- [Playwright](https://playwright.dev)
+- [Scrapy](https://scrapy.org)
+
+## Ожидаемый результат
+
+Поддерживаемый pipeline, который регулярно находит тысячи уникальных **релевантных и ценных** сообществ с минимальной ручной проверкой и безопасно пополняет Warmr inventory без дублей.
