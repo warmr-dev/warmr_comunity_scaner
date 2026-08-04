@@ -8,7 +8,7 @@ from community_scanner.discovery import QueryParams
 from community_scanner.models import Base
 from community_scanner.pipeline import run_pipeline
 from community_scanner.store import make_engine, make_session_factory
-from community_scanner.sync import dry_run_sync
+from community_scanner.sync import dry_run_sync, sync_rows_to_warmr
 
 
 def cmd_init_db(_: argparse.Namespace) -> None:
@@ -41,6 +41,32 @@ def cmd_sync_dry(args: argparse.Namespace) -> None:
     with Session() as session:
         payloads = dry_run_sync(session, settings.sync_value_tier_list)
     print(json.dumps({"count": len(payloads), "payloads": payloads[: args.limit]}, indent=2))
+
+
+def cmd_sync_warmr(args: argparse.Namespace) -> None:
+    settings = get_settings()
+    if not settings.warmr_database_url:
+        raise SystemExit("WARMR_DATABASE_URL is empty. Set it in .env to enable sync.")
+
+    scanner_session_factory = make_session_factory(settings.database_url)
+    warmr_engine = make_engine(settings.warmr_database_url)
+    WarmrSession = lambda: None  # placeholder; we create session via sessionmaker below
+    from sqlalchemy.orm import sessionmaker
+
+    warmr_session_factory = sessionmaker(bind=warmr_engine, autoflush=False, autocommit=False)
+
+    value_tiers = [t.strip() for t in args.value_tiers.split(",") if t.strip()]
+
+    with scanner_session_factory() as scanner_session, warmr_session_factory() as warmr_session:
+        count = sync_rows_to_warmr(
+            scanner_session,
+            warmr_session,
+            value_tiers,
+            warmr_table_name=args.table,
+            upsert_key=args.upsert_key,
+        )
+
+    print(json.dumps({"synced": count, "table": args.table, "upsert_key": args.upsert_key}, indent=2))
 
 
 def cmd_list(args: argparse.Namespace) -> None:
@@ -89,6 +115,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_sync = sub.add_parser("sync-dry-run", help="Show payloads ready for Warmr DB")
     p_sync.add_argument("--limit", type=int, default=20)
     p_sync.set_defaults(func=cmd_sync_dry)
+
+    p_sync_write = sub.add_parser("sync-warmr", help="Write communities into Warmr DB (upsert)")
+    p_sync_write.add_argument("--value-tiers", default="high,medium")
+    p_sync_write.add_argument("--table", default="communities")
+    p_sync_write.add_argument("--upsert-key", default="canonical_key")
+    p_sync_write.set_defaults(func=cmd_sync_warmr)
 
     p_list = sub.add_parser("list", help="List communities in local DB")
     p_list.add_argument("--limit", type=int, default=50)

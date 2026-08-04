@@ -20,6 +20,22 @@ community-scanner run --niche accounting --geo Florida --queries 3 --max-fetch 5
 community-scanner list
 ```
 
+## Деплой в Railway/Render (быстрая проверка)
+
+Подготовь Docker:
+
+1. В репозитории есть `Dockerfile` и `docker/entrypoint.sh`.
+2. На Railway/Render укажи запуск контейнера из Dockerfile.
+
+Переменные окружения (минимум):
+
+- `DISCOVERY_PROVIDERS=seeds` (чтобы не нужны были ключи)
+- `DATABASE_URL` (можно оставить как sqlite по умолчанию)
+- `WARMR_DATABASE_URL` (если хочешь сразу проверить sync)
+- `PIPE_GEO`, `PIPE_NICHE` (опционально)
+
+После деплоя проверь логи: должны появиться `run_id` метрики и (если задан WARMR_DATABASE_URL) строки `synced`.
+
 Результат пишется в `data/scanner.db`. Хостинг (Railway/Render) решим позже.
 
 ## Команды
