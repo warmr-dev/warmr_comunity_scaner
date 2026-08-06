@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from community_scanner.discovery.base import DiscoveryProvider
 from community_scanner.etalons import etalon_seed_entries
 from community_scanner.models import DiscoveryHit
+from community_scanner.paths import data_dir
 
-ROOT = Path(__file__).resolve().parents[3]
-SEEDS_PATH = ROOT / "data" / "seeds.json"
+SEEDS_PATH = data_dir() / "seeds.json"
 
 # Fallback if seeds.json missing
 DEFAULT_SEEDS: list[tuple[str, str, str]] = [

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ETALONS_PATH = ROOT / "data" / "warmr_gold_etalons.json"
+from community_scanner.paths import data_dir
+
+ETALONS_PATH = data_dir() / "warmr_gold_etalons.json"
 
 
 @lru_cache

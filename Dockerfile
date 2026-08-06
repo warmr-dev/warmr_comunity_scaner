@@ -12,9 +12,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-COPY tests ./tests
+COPY data ./data
+COPY docker ./docker
 
 RUN pip install --no-cache-dir .
+
+ENV SCANNER_DATA_DIR=/app/data
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
