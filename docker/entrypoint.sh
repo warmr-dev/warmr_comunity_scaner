@@ -12,6 +12,9 @@ NICE_ARGS="${PIPE_NICHE:-accounting}"
 GEO_ARGS="${PIPE_GEO:-Florida}"
 QUERIES_ARGS="${PIPE_QUERIES:-1}"
 
+# 0) Ensure schema exists (fresh SQLite volume / first deploy)
+community-scanner init-db
+
 # 1) Run scanner
 community-scanner run --niche "$NICE_ARGS" --geo "$GEO_ARGS" --queries "$QUERIES_ARGS" --per-query "${PIPE_PER_QUERY:-10}" --max-fetch "${PIPE_MAX_FETCH:-20}"
 

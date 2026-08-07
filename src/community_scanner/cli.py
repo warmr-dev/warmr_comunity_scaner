@@ -20,6 +20,8 @@ def cmd_init_db(_: argparse.Namespace) -> None:
 
 def cmd_discover(args: argparse.Namespace) -> None:
     settings = get_settings()
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
     Session = make_session_factory(settings.database_url)
     params = QueryParams(geo=args.geo, niche=args.niche, audience=args.audience)
     with Session() as session:
