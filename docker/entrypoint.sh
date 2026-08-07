@@ -10,20 +10,20 @@ cd /app
 
 NICE_ARGS="${PIPE_NICHE:-accounting}"
 GEO_ARGS="${PIPE_GEO:-Florida}"
-QUERIES_ARGS="${PIPE_QUERIES:-5}"
+# One query batch; pull a large seed page so we don't stop at 3 URLs
+QUERIES_ARGS="${PIPE_QUERIES:-1}"
+PER_QUERY_ARGS="${PIPE_PER_QUERY:-120}"
+MAX_FETCH_ARGS="${PIPE_MAX_FETCH:-120}"
 
-# 0) Create/update schema on DATABASE_URL (Supabase table community_scanner)
 community-scanner init-db
 
-# 1) Discovery + parse + classify + upsert into community_scanner
 community-scanner run \
   --niche "$NICE_ARGS" \
   --geo "$GEO_ARGS" \
   --queries "$QUERIES_ARGS" \
-  --per-query "${PIPE_PER_QUERY:-10}" \
-  --max-fetch "${PIPE_MAX_FETCH:-40}"
+  --per-query "$PER_QUERY_ARGS" \
+  --max-fetch "$MAX_FETCH_ARGS"
 
-# 2) Optional: sync to a second DB if WARMR_DATABASE_URL is set
 if [ -n "${WARMR_DATABASE_URL:-}" ]; then
   community-scanner sync-warmr \
     --value-tiers "$SYNC_VALUE_TIERS" \
