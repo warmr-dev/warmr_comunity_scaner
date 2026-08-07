@@ -12,21 +12,25 @@ class Settings(BaseSettings):
     )
 
     app_env: str = "local"
-    # Local-first: SQLite. Switch to Postgres when Docker/Railway is ready.
+    # Local: SQLite. Production: Supabase Postgres (Session pooler URI).
     database_url: str = "sqlite:///./data/scanner.db"
     redis_url: str = "redis://localhost:6379/0"
 
     brave_search_api_key: str = ""
     searxng_base_url: str = "http://localhost:8080"
+    # Without Brave key use seeds; later: DISCOVERY_PROVIDERS=brave
     discovery_providers: str = "seeds"
 
     llm_enabled: bool = False
     openai_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
 
+    # Optional second DB (legacy). Prefer writing directly via DATABASE_URL → community_scanner.
     warmr_database_url: str = ""
     warmr_sync_enabled: bool = False
-    sync_value_tiers: str = "high,medium"
+    sync_value_tiers: str = "high,medium,low"
+    warmr_table_name: str = "community_scanner"
+    warmr_upsert_key: str = "canonical_key"
 
     http_timeout_seconds: float = 20.0
     crawl_download_delay_seconds: float = 1.0

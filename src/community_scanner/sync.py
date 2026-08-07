@@ -114,7 +114,7 @@ def sync_rows_to_warmr(
     warmr_session: Session,
     value_tiers: list[str],
     *,
-    warmr_table_name: str = "communities",
+    warmr_table_name: str = "community_scanner",
     upsert_key: str = "canonical_key",
 ) -> int:
     """

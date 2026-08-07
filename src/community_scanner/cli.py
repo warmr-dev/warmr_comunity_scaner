@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_sync_write = sub.add_parser("sync-warmr", help="Write communities into Warmr DB (upsert)")
     p_sync_write.add_argument("--value-tiers", default="high,medium")
-    p_sync_write.add_argument("--table", default="communities")
+    p_sync_write.add_argument("--table", default="community_scanner")
     p_sync_write.add_argument("--upsert-key", default="canonical_key")
     p_sync_write.set_defaults(func=cmd_sync_warmr)
 

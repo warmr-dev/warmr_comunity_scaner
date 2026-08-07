@@ -10,8 +10,9 @@ class Base(DeclarativeBase):
 
 
 class CommunityRow(Base):
-    __tablename__ = "communities"
-    __table_args__ = (UniqueConstraint("canonical_key", name="uq_communities_canonical_key"),)
+    # Supabase production table name
+    __tablename__ = "community_scanner"
+    __table_args__ = (UniqueConstraint("canonical_key", name="uq_community_scanner_canonical_key"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     canonical_key: Mapped[str] = mapped_column(String(512), nullable=False, index=True)
