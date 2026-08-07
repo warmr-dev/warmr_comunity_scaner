@@ -11,5 +11,7 @@ dist/
 build/
 *.egg-info/
 .scrapy/
-data/
+data/*
+!data/seeds.json
+!data/warmr_gold_etalons.json
 *.log

@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from functools import lru_cache
 
-from community_scanner.paths import data_dir
+from community_scanner.paths import resolve_data_file
 
-ETALONS_PATH = data_dir() / "warmr_gold_etalons.json"
+ETALONS_PATH = resolve_data_file("warmr_gold_etalons.json")
 
 
 @lru_cache

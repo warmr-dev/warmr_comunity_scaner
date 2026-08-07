@@ -5,9 +5,9 @@ import json
 from community_scanner.discovery.base import DiscoveryProvider
 from community_scanner.etalons import etalon_seed_entries
 from community_scanner.models import DiscoveryHit
-from community_scanner.paths import data_dir
+from community_scanner.paths import resolve_data_file
 
-SEEDS_PATH = data_dir() / "seeds.json"
+SEEDS_PATH = resolve_data_file("seeds.json")
 
 # Fallback if seeds.json missing
 DEFAULT_SEEDS: list[tuple[str, str, str]] = [
