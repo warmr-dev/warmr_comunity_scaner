@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from community_scanner.config import Settings
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams, generate_queries
 from community_scanner.discovery.brave import BraveSearchProvider
@@ -19,13 +23,22 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
                 )
             )
         elif name == "searxng":
-            providers.append(
-                SearxngProvider(
-                    base_url=settings.searxng_base_url,
-                    timeout=settings.http_timeout_seconds,
+            if settings.searxng_base_url:
+                providers.append(
+                    SearxngProvider(
+                        base_url=settings.searxng_base_url,
+                        timeout=settings.http_timeout_seconds,
+                        language=settings.searxng_language,
+                    )
                 )
-            )
     return providers
+
+
+def _search_safe(provider: DiscoveryProvider, query: str, per_query: int) -> list[DiscoveryHit]:
+    try:
+        return provider.search(query, count=per_query)
+    except Exception:
+        return []
 
 
 def run_discovery(
@@ -35,21 +48,32 @@ def run_discovery(
     query_limit: int = 20,
 ) -> list[DiscoveryHit]:
     providers = build_providers(settings)
+    if not providers:
+        raise RuntimeError(
+            "No discovery providers configured. Set DISCOVERY_PROVIDERS=searxng and SEARXNG_BASE_URL."
+        )
+
     queries = generate_queries(params, limit=query_limit)
     hits: list[DiscoveryHit] = []
     seen_urls: set[str] = set()
 
-    for query in queries:
-        for provider in providers:
-            try:
-                batch = provider.search(query, count=per_query)
-            except Exception:
-                continue
-            for hit in batch:
+    tasks: list[tuple[DiscoveryProvider, str]] = [
+        (provider, query) for query in queries for provider in providers
+    ]
+
+    workers = min(settings.discovery_concurrency, len(tasks))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_search_safe, provider, query, per_query): (provider, query)
+            for provider, query in tasks
+        }
+        for future in as_completed(futures):
+            for hit in future.result():
                 if hit.url in seen_urls:
                     continue
                 seen_urls.add(hit.url)
                 hits.append(hit)
+
     return hits
 
 

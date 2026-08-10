@@ -27,13 +27,56 @@ services:
 
   searxng:
     image: searxng/searxng:latest
-    profiles: ["searxng"]
     ports:
       - "8080:8080"
     volumes:
       - ./docker/searxng:/etc/searxng:ro
     environment:
       SEARXNG_BASE_URL: http://localhost:8080/
+
+  scanner:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    environment:
+      APP_ENV: local
+      DATABASE_URL: sqlite:///./data/scanner.db
+      REDIS_URL: redis://redis:6379/0
+      USE_FETCH_QUEUE: "true"
+      DISCOVERY_PROVIDERS: searxng
+      SEARXNG_BASE_URL: http://searxng:8080
+      DISCOVERY_CONCURRENCY: 8
+      SCANNER_MODE: full
+      FETCH_CONCURRENCY: 50
+      FETCH_BATCH_SIZE: 200
+      WORKER_MAX_ITEMS: 1000
+      PIPE_NICHE: business
+      PIPE_GEO: USA
+      SEARXNG_LANGUAGE: en-US
+      PIPE_QUERIES: 5
+      PIPE_PER_QUERY: 15
+    volumes:
+      - ./data:/app/data
+
+  scanner-worker:
+    build: .
+    profiles: ["worker"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: local
+      DATABASE_URL: sqlite:///./data/scanner.db
+      REDIS_URL: redis://redis:6379/0
+      USE_FETCH_QUEUE: "true"
+      SCANNER_MODE: worker
+      FETCH_CONCURRENCY: 20
+      WORKER_MAX_ITEMS: 10000
+    volumes:
+      - ./data:/app/data
 
 volumes:
   scanner_pg:

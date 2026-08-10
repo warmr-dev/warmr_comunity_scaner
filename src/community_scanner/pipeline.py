@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 
 import httpx
@@ -8,10 +9,22 @@ from sqlalchemy.orm import Session
 from community_scanner.classify import classify
 from community_scanner.config import Settings
 from community_scanner.discovery import QueryParams, run_discovery
+from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
-from community_scanner.models import PipelineRunRow
+from community_scanner.models import (
+    AccessStatus,
+    DiscoveryHit,
+    ExtractedCommunity,
+    NormalizedUrl,
+    PipelineRunRow,
+    Platform,
+    ValueTier,
+)
 from community_scanner.normalize import normalize_url
+from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
 from community_scanner.store import save_discovery_hits, upsert_community
+
+USER_AGENT = "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
 
 
 @dataclass
@@ -26,6 +39,7 @@ class PipelineMetrics:
     upserted_changed: int = 0
     upserted_unchanged: int = 0
     llm_calls: int = 0
+    enqueued: int = 0
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
@@ -37,14 +51,304 @@ class PipelineResult:
     run_id: str | None = None
 
 
-def fetch_html(url: str, timeout: float) -> str:
-    headers = {
-        "User-Agent": "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
-    }
-    with httpx.Client(timeout=timeout, follow_redirects=True, headers=headers) as client:
-        resp = client.get(url)
-        resp.raise_for_status()
-        return resp.text
+@dataclass
+class ProcessOutcome:
+    item: ExtractedCommunity
+    fetched: bool
+    llm_calls: int = 0
+
+
+def _http_limits(concurrency: int) -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=concurrency,
+        max_keepalive_connections=concurrency,
+    )
+
+
+def _stub_from_error(hit: DiscoveryHit, norm: NormalizedUrl, exc: Exception, *, scan_geo: str) -> ExtractedCommunity:
+    return ExtractedCommunity(
+        website=norm.website,
+        canonical_key=norm.canonical_key,
+        canonical_domain=norm.canonical_domain,
+        platform=norm.platform,
+        platform_id=norm.platform_id,
+        name=hit.title,
+        geo=scan_geo,
+        access_status=AccessStatus.WATCH,
+        value_tier=ValueTier.LOW,
+        source_queries=[hit.query] if hit.query else [],
+        raw_signals={"fetch_error": str(exc)},
+        needs_llm=True,
+    )
+
+
+def _extract_and_classify(
+    html: str,
+    hit: DiscoveryHit,
+    norm: NormalizedUrl,
+    settings: Settings,
+    *,
+    llm_on: bool,
+    scan_geo: str,
+) -> ProcessOutcome:
+    item = heuristic_extract(html, norm, query=hit.query)
+    llm_calls = 0
+    if llm_on and item.needs_llm:
+        llm = llm_extract_from_text(
+            html,
+            api_key=settings.openai_api_key,
+            model=settings.llm_model,
+        )
+        if llm:
+            item = merge_llm_result(item, llm)
+            llm_calls = 1
+    item = classify(item)
+    item = item.model_copy(update={"geo": scan_geo})
+    return ProcessOutcome(item=item, fetched=True, llm_calls=llm_calls)
+
+
+async def _process_candidate_async(
+    client: httpx.AsyncClient,
+    semaphore: asyncio.Semaphore,
+    hit: DiscoveryHit,
+    norm: NormalizedUrl,
+    settings: Settings,
+    *,
+    llm_on: bool,
+    scan_geo: str,
+) -> ProcessOutcome:
+    async with semaphore:
+        if settings.crawl_download_delay_seconds > 0:
+            await asyncio.sleep(settings.crawl_download_delay_seconds)
+        try:
+            resp = await client.get(norm.website)
+            resp.raise_for_status()
+            html = resp.text
+        except Exception as exc:  # noqa: BLE001
+            return ProcessOutcome(item=_stub_from_error(hit, norm, exc, scan_geo=scan_geo), fetched=False)
+
+    return _extract_and_classify(html, hit, norm, settings, llm_on=llm_on, scan_geo=scan_geo)
+
+
+async def _process_candidates_async(
+    candidates: list[tuple[DiscoveryHit, NormalizedUrl]],
+    settings: Settings,
+    *,
+    llm_on: bool,
+    concurrency: int,
+    scan_geo: str,
+) -> list[ProcessOutcome]:
+    semaphore = asyncio.Semaphore(concurrency)
+    timeout = httpx.Timeout(settings.http_timeout_seconds)
+    headers = {"User-Agent": USER_AGENT}
+
+    async with httpx.AsyncClient(
+        timeout=timeout,
+        follow_redirects=True,
+        headers=headers,
+        limits=_http_limits(concurrency),
+    ) as client:
+        tasks = [
+            _process_candidate_async(
+                client, semaphore, hit, norm, settings, llm_on=llm_on, scan_geo=scan_geo
+            )
+            for hit, norm in candidates
+        ]
+        return list(await asyncio.gather(*tasks))
+
+
+def process_candidates_parallel(
+    candidates: list[tuple[DiscoveryHit, NormalizedUrl]],
+    settings: Settings,
+    *,
+    llm_on: bool,
+    max_items: int | None = None,
+    concurrency: int | None = None,
+    scan_geo: str | None = None,
+) -> list[ProcessOutcome]:
+    if not candidates:
+        return []
+
+    limit = max_items if max_items is not None else len(candidates)
+    workers = concurrency if concurrency is not None else settings.fetch_concurrency
+    batch = candidates[:limit]
+    geo = scan_geo or settings.pipe_geo
+    return asyncio.run(
+        _process_candidates_async(
+            batch, settings, llm_on=llm_on, concurrency=workers, scan_geo=geo
+        )
+    )
+
+
+def job_to_models(job: dict) -> tuple[DiscoveryHit, NormalizedUrl, str]:
+    hit = DiscoveryHit(
+        url=job["url"],
+        title=job.get("title"),
+        snippet=job.get("snippet"),
+        provider=job.get("provider", "queue"),
+        query=job.get("query"),
+    )
+    norm = NormalizedUrl(
+        original_url=job["url"],
+        website=job["website"],
+        canonical_domain=job["canonical_domain"],
+        platform=Platform(job["platform"]),
+        platform_id=job.get("platform_id"),
+        canonical_key=job["canonical_key"],
+    )
+    return hit, norm, job.get("geo") or "USA"
+
+
+def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: PipelineMetrics) -> None:
+    for outcome in outcomes:
+        if outcome.fetched:
+            metrics.fetched += 1
+        else:
+            metrics.fetch_errors += 1
+        metrics.llm_calls += outcome.llm_calls
+
+        _, created, changed = upsert_community(session, outcome.item)
+        if created:
+            metrics.upserted_new += 1
+        elif changed:
+            metrics.upserted_changed += 1
+        else:
+            metrics.upserted_unchanged += 1
+
+
+def discover_candidates(
+    settings: Settings,
+    params: QueryParams,
+    *,
+    per_query: int,
+    query_limit: int,
+) -> tuple[list, dict[str, str], list[tuple[DiscoveryHit, NormalizedUrl]], PipelineMetrics]:
+    metrics = PipelineMetrics(queries_estimated=query_limit)
+    hits = run_discovery(settings, params, per_query=per_query, query_limit=query_limit)
+    metrics.discovery_hits = len(hits)
+
+    key_by_url: dict[str, str] = {}
+    candidates: list[tuple[DiscoveryHit, NormalizedUrl]] = []
+    for hit in hits:
+        norm = normalize_url(hit.url)
+        if norm.is_blocked:
+            metrics.blocked += 1
+            continue
+        metrics.normalized += 1
+        key_by_url[hit.url] = norm.canonical_key
+        candidates.append((hit, norm))
+
+    unique: dict[str, tuple[DiscoveryHit, NormalizedUrl]] = {}
+    for hit, norm in candidates:
+        unique.setdefault(norm.canonical_key, (hit, norm))
+
+    return hits, key_by_url, list(unique.values()), metrics
+
+
+def run_discovery_only(
+    session: Session,
+    settings: Settings,
+    params: QueryParams,
+    *,
+    query_limit: int = 10,
+    per_query: int = 5,
+    enqueue_all: bool = True,
+) -> PipelineResult:
+    metrics = PipelineMetrics(queries_estimated=query_limit)
+    run = PipelineRunRow(status="running", metrics={})
+    session.add(run)
+    session.commit()
+
+    try:
+        hits, key_by_url, unique_candidates, metrics = discover_candidates(
+            settings,
+            params,
+            per_query=per_query,
+            query_limit=query_limit,
+        )
+        save_discovery_hits(session, hits, key_by_url)
+
+        if enqueue_all and settings.use_fetch_queue and unique_candidates:
+            scan_geo = resolve_geo(params.geo)
+            jobs = [
+                fetch_job_from_candidate(hit, norm, geo=scan_geo)
+                for hit, norm in unique_candidates
+            ]
+            metrics.enqueued = enqueue_fetch_jobs(settings, jobs)
+
+        from datetime import datetime, timezone
+
+        run.status = "success"
+        run.finished_at = datetime.now(timezone.utc)
+        run.metrics = metrics.as_dict()
+        session.commit()
+        return PipelineResult(metrics=metrics, run_id=run.id)
+    except Exception as exc:  # noqa: BLE001
+        from datetime import datetime, timezone
+
+        run.status = "error"
+        run.error = str(exc)
+        run.finished_at = datetime.now(timezone.utc)
+        run.metrics = metrics.as_dict()
+        session.commit()
+        raise
+
+
+def run_fetch_worker(
+    session: Session,
+    settings: Settings,
+    *,
+    max_items: int | None = None,
+    use_llm: bool | None = None,
+) -> PipelineResult:
+    from community_scanner.queue import dequeue_fetch_jobs
+
+    metrics = PipelineMetrics()
+    run = PipelineRunRow(status="running", metrics={})
+    session.add(run)
+    session.commit()
+
+    llm_on = settings.llm_enabled if use_llm is None else use_llm
+    budget = max_items if max_items is not None else settings.worker_max_items
+    processed = 0
+
+    try:
+        while processed < budget:
+            batch_size = min(settings.fetch_batch_size, budget - processed)
+            jobs = dequeue_fetch_jobs(settings, batch_size)
+            if not jobs:
+                break
+
+            candidates = [job_to_models(job) for job in jobs]
+            parallel_candidates = [(hit, norm) for hit, norm, _ in candidates]
+            scan_geo = candidates[0][2] if candidates else settings.pipe_geo
+            outcomes = process_candidates_parallel(
+                parallel_candidates,
+                settings,
+                llm_on=llm_on,
+                max_items=len(parallel_candidates),
+                scan_geo=scan_geo,
+            )
+            apply_outcomes(session, outcomes, metrics)
+            session.commit()
+            processed += len(candidates)
+
+        from datetime import datetime, timezone
+
+        run.status = "success"
+        run.finished_at = datetime.now(timezone.utc)
+        run.metrics = metrics.as_dict()
+        session.commit()
+        return PipelineResult(metrics=metrics, run_id=run.id)
+    except Exception as exc:  # noqa: BLE001
+        from datetime import datetime, timezone
+
+        run.status = "error"
+        run.error = str(exc)
+        run.finished_at = datetime.now(timezone.utc)
+        run.metrics = metrics.as_dict()
+        session.commit()
+        raise
 
 
 def run_pipeline(
@@ -63,79 +367,34 @@ def run_pipeline(
     session.commit()
 
     try:
-        hits = run_discovery(settings, params, per_query=per_query, query_limit=query_limit)
-        metrics.discovery_hits = len(hits)
-
-        key_by_url: dict[str, str] = {}
-        candidates = []
-        for hit in hits:
-            norm = normalize_url(hit.url)
-            if norm.is_blocked:
-                metrics.blocked += 1
-                continue
-            metrics.normalized += 1
-            key_by_url[hit.url] = norm.canonical_key
-            candidates.append((hit, norm))
-
+        hits, key_by_url, unique_candidates, metrics = discover_candidates(
+            settings,
+            params,
+            per_query=per_query,
+            query_limit=query_limit,
+        )
         save_discovery_hits(session, hits, key_by_url)
 
-        # Deduplicate by canonical_key before fetch
-        unique: dict[str, tuple] = {}
-        for hit, norm in candidates:
-            unique.setdefault(norm.canonical_key, (hit, norm))
-
         llm_on = settings.llm_enabled if use_llm is None else use_llm
+        scan_geo = resolve_geo(params.geo)
+        inline = unique_candidates[:max_fetch]
+        overflow = unique_candidates[max_fetch:]
 
-        for hit, norm in list(unique.values())[:max_fetch]:
-            try:
-                html = fetch_html(norm.website, settings.http_timeout_seconds)
-                metrics.fetched += 1
-            except Exception as exc:  # noqa: BLE001
-                metrics.fetch_errors += 1
-                # Still store a stub watch row from discovery metadata
-                from community_scanner.models import AccessStatus, ExtractedCommunity, ValueTier
+        outcomes = process_candidates_parallel(
+            inline,
+            settings,
+            llm_on=llm_on,
+            max_items=max_fetch,
+            scan_geo=scan_geo,
+        )
+        apply_outcomes(session, outcomes, metrics)
 
-                stub = ExtractedCommunity(
-                    website=norm.website,
-                    canonical_key=norm.canonical_key,
-                    canonical_domain=norm.canonical_domain,
-                    platform=norm.platform,
-                    platform_id=norm.platform_id,
-                    name=hit.title,
-                    access_status=AccessStatus.WATCH,
-                    value_tier=ValueTier.LOW,
-                    source_queries=[hit.query] if hit.query else [],
-                    raw_signals={"fetch_error": str(exc)},
-                    needs_llm=True,
-                )
-                _, created, changed = upsert_community(session, stub)
-                if created:
-                    metrics.upserted_new += 1
-                elif changed:
-                    metrics.upserted_changed += 1
-                else:
-                    metrics.upserted_unchanged += 1
-                continue
-
-            item = heuristic_extract(html, norm, query=hit.query)
-            if llm_on and item.needs_llm:
-                llm = llm_extract_from_text(
-                    html,
-                    api_key=settings.openai_api_key,
-                    model=settings.llm_model,
-                )
-                if llm:
-                    item = merge_llm_result(item, llm)
-                    metrics.llm_calls += 1
-
-            item = classify(item)
-            _, created, changed = upsert_community(session, item)
-            if created:
-                metrics.upserted_new += 1
-            elif changed:
-                metrics.upserted_changed += 1
-            else:
-                metrics.upserted_unchanged += 1
+        if overflow and settings.use_fetch_queue:
+            jobs = [
+                fetch_job_from_candidate(hit, norm, geo=scan_geo)
+                for hit, norm in overflow
+            ]
+            metrics.enqueued = enqueue_fetch_jobs(settings, jobs)
 
         from datetime import datetime, timezone
 

@@ -35,26 +35,24 @@ Edge можно максимум как тонкий trigger («запусти w
 **Практический выбор Warmr:** **Railway или Render** + Docker.  
 VPS не нужен специально под этот микросервис (даже если DigitalOcean уже есть в инфраструктуре).
 
-## Частота прогонов (решение по умолчанию)
+## Частота прогонов (целевой режим)
 
-Пока нет жёсткого SLA от продукта:
+| Job | Частота |
+|-----|---------|
+| Discovery (SearXNG global search) | **2× в день** (cron) |
+| Fetch worker (Redis queue) | в том же cron (`SCANNER_MODE=full`) или отдельный always-on worker |
+| Re-fetch Watch/medium | 1× в неделю (отдельный cron с `SCANNER_MODE=worker`) |
+| Sync в Warmr DB | после успешного classify |
 
-| Job | Частота MVP |
-|-----|-------------|
-| Discovery (queries/seeds) | **2–3× в неделю** или nightly по 1 нише |
-| Re-fetch известных Watch/medium | **1× в неделю** |
-| Sync в Warmr DB | после успешного classify, **continuous или nightly** |
-| Full re-score inventory | реже (раз в 2–4 недели) |
-
-Если позже понадобится «как только нашли — сразу в Warmr», оставляем worker 24/7 и короткий sync loop — это всё ещё Docker, не edge.
+Тайминги и env: [`supabase-searxng-setup.md`](supabase-searxng-setup.md).
 
 ## Минимальный prod-состав
 
-1. `worker` — pipeline
-2. `scheduler` — cron внутри или платформенный cron
-3. Managed **Postgres** (Railway/Render/Neon/Supabase) — можно один инстанс для scanner staging
-4. Managed **Redis** (опционально на MVP; для очередей — да)
-5. SearXNG — optional sidecar; Brave API не требует sidecar
+1. `scanner` — discovery + fetch worker (`SCANNER_MODE=full`)
+2. **Cron** — Railway scheduler 2×/день
+3. **Supabase Postgres** — `community_scanner`
+4. **Redis** — fetch queue (`USE_FETCH_QUEUE=true`)
+5. **SearXNG** — sidecar для бесплатного web discovery
 
 ## Решение (зафиксировано командой)
 

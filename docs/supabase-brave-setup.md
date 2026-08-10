@@ -1,5 +1,7 @@
 # Production setup: Brave Search + Supabase (`community_scanner`)
 
+> **Deprecated:** use [`supabase-searxng-setup.md`](supabase-searxng-setup.md) — Brave заменён на SearXNG + Redis queue.
+
 Project ref: `bpxiawuzidhjalaemejy` (name: scanner)
 
 ## 1. Why Railway crashed

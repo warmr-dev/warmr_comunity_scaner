@@ -28,6 +28,7 @@ CHANGED_FIELDS = (
     "size_members",
     "access_status",
     "value_tier",
+    "geo",
 )
 
 

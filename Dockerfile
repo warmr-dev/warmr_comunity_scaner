@@ -1,24 +1,34 @@
-FROM python:3.10-slim
+# All-in-one: bundled SearXNG + community scanner (single Railway service).
+FROM searxng/searxng:latest
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+USER root
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    curl \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY docker ./docker
 
-RUN pip install --no-cache-dir . \
+RUN pip3 install --no-cache-dir --break-system-packages . 2>/dev/null \
+    || pip3 install --no-cache-dir . \
     && mkdir -p /app/data
 
-ENV SCANNER_DATA_DIR=/app/data
+COPY docker/searxng/settings.yml /etc/searxng/settings.yml
 
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+ENV SCANNER_DATA_DIR=/app/data \
+    BUNDLE_SEARXNG=true \
+    SEARXNG_BASE_URL=http://127.0.0.1:8080 \
+    SEARXNG_BIND_ADDRESS=127.0.0.1 \
+    USE_FETCH_QUEUE=false \
+    SCANNER_MODE=run \
+    DISCOVERY_PROVIDERS=searxng
 
-CMD ["/entrypoint.sh"]
+RUN chmod +x /app/docker/entrypoint.sh /app/docker/entrypoint-all-in-one.sh
+
+ENTRYPOINT ["/app/docker/entrypoint-all-in-one.sh"]
