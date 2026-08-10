@@ -1,5 +1,5 @@
 # All-in-one: scanner + SearXNG on Debian (python:3.10-slim).
-# searxng/searxng:latest uses Wolfi (no apt/apk) — cannot extend it directly.
+# Official searxng/searxng image is Wolfi (no apt/apk) — install SearXNG from source instead.
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -21,9 +21,12 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY docker ./docker
 
-# Scanner + bundled SearXNG (granian WSGI)
-RUN pip install --no-cache-dir granian \
-    && pip install --no-cache-dir "git+https://github.com/searxng/searxng.git" \
+# Clone SearXNG, install its deps first (setup.py imports msgspec), then scanner.
+RUN git clone --depth 1 https://github.com/searxng/searxng.git /opt/searxng \
+    && pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir granian \
+    && pip install --no-cache-dir -r /opt/searxng/requirements.txt \
+    && pip install --no-cache-dir --no-deps /opt/searxng \
     && pip install --no-cache-dir . \
     && mkdir -p /app/data /etc/searxng
 
@@ -37,7 +40,8 @@ ENV SCANNER_DATA_DIR=/app/data \
     SEARXNG_PORT=8080 \
     USE_FETCH_QUEUE=false \
     SCANNER_MODE=run \
-    DISCOVERY_PROVIDERS=searxng
+    DISCOVERY_PROVIDERS=searxng \
+    PYTHONPATH=/opt/searxng
 
 RUN chmod +x /app/docker/entrypoint.sh /app/docker/entrypoint-all-in-one.sh
 
