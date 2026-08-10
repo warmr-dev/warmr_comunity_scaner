@@ -47,6 +47,8 @@ def run_discovery(
     per_query: int = 10,
     query_limit: int = 20,
 ) -> list[DiscoveryHit]:
+    import time
+
     providers = build_providers(settings)
     if not providers:
         raise RuntimeError(
@@ -62,11 +64,17 @@ def run_discovery(
     ]
 
     workers = min(settings.discovery_concurrency, len(tasks))
+    # Space out SearXNG queries — cloud IPs get rate-limited quickly.
+    delay = max(0.0, settings.crawl_download_delay_seconds)
+    if "searxng" in settings.discovery_provider_list and delay <= 0:
+        delay = 1.5
+
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(_search_safe, provider, query, per_query): (provider, query)
-            for provider, query in tasks
-        }
+        futures = {}
+        for provider, query in tasks:
+            futures[executor.submit(_search_safe, provider, query, per_query)] = (provider, query)
+            if delay > 0:
+                time.sleep(delay / max(workers, 1))
         for future in as_completed(futures):
             for hit in future.result():
                 if hit.url in seen_urls:

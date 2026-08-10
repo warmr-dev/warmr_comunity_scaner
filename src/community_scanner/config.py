@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     searxng_base_url: str = "http://127.0.0.1:8080"
     # Global web discovery via self-hosted SearXNG only.
     discovery_providers: str = "searxng"
-    discovery_concurrency: int = Field(default=8, ge=1, le=50)
+    discovery_concurrency: int = Field(default=2, ge=1, le=50)
     brave_search_api_key: str = ""
 
     llm_enabled: bool = False
