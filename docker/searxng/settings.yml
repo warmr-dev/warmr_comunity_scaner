@@ -1,21 +1,44 @@
-# Warmr community scanner — bundled SearXNG settings
+# Warmr community scanner — bundled SearXNG settings (USA)
 
 use_default_settings: true
+
+general:
+  debug: false
+  instance_name: "warmr-scanner"
 
 server:
   secret_key: "warmr-scanner-change-in-production"
   limiter: false
   image_proxy: false
+  bind_address: "127.0.0.1"
+  port: 8080
 
 search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en-US"
   formats:
     - html
     - json
 
+# Prefer engines that work better from datacenter IPs (DDG often CAPTCHA).
 engines:
   - name: duckduckgo
-    disabled: false
+    disabled: true
   - name: brave
     disabled: false
+    weight: 1.2
   - name: bing
     disabled: false
+    weight: 1.2
+  - name: wikipedia
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: startpage
+    disabled: true
+
+outgoing:
+  request_timeout: 8.0
+  max_request_timeout: 15.0
+  useragent_suffix: " WarmrScanner/0.1"

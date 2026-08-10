@@ -18,6 +18,8 @@ class SearxngProvider(DiscoveryProvider):
         hits: list[DiscoveryHit] = []
         page = 1
         max_pages = max(1, (count + 9) // 10)
+        # Prefer engines that work from cloud IPs (DuckDuckGo often CAPTCHA).
+        engines = "bing,brave,mojeek"
 
         with httpx.Client(timeout=self.timeout) as client:
             while len(hits) < count and page <= max_pages:
@@ -26,6 +28,7 @@ class SearxngProvider(DiscoveryProvider):
                     "format": "json",
                     "pageno": page,
                     "language": self.language,
+                    "engines": engines,
                 }
                 resp = client.get(f"{self.base_url}/search", params=params)
                 resp.raise_for_status()
@@ -33,6 +36,13 @@ class SearxngProvider(DiscoveryProvider):
 
                 results = data.get("results") or []
                 if not results:
+                    # Surface CAPTCHA / engine failures in Railway logs
+                    unresponsive = data.get("unresponsive_engines") or []
+                    if unresponsive:
+                        print(
+                            f"searxng empty for q={query!r} page={page}: {unresponsive}",
+                            flush=True,
+                        )
                     break
 
                 for item in results:
