@@ -1,34 +1,40 @@
-# All-in-one: bundled SearXNG + community scanner (single Railway service).
-# Base image searxng/searxng is Alpine — use apk, not apt-get.
-FROM searxng/searxng:latest
+# All-in-one: scanner + SearXNG on Debian (python:3.10-slim).
+# searxng/searxng:latest uses Wolfi (no apt/apk) — cannot extend it directly.
+FROM python:3.10-slim
 
-USER root
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-RUN apk add --no-cache \
-    build-base \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     curl \
-    python3-dev \
-    py3-pip \
+    ca-certificates \
+    git \
     libxml2-dev \
     libxslt-dev \
     libffi-dev \
-    openssl-dev
+    && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY docker ./docker
 
-RUN pip3 install --no-cache-dir . \
-    && mkdir -p /app/data
+# Scanner + bundled SearXNG (granian WSGI)
+RUN pip install --no-cache-dir granian \
+    && pip install --no-cache-dir "git+https://github.com/searxng/searxng.git" \
+    && pip install --no-cache-dir . \
+    && mkdir -p /app/data /etc/searxng
 
 COPY docker/searxng/settings.yml /etc/searxng/settings.yml
 
 ENV SCANNER_DATA_DIR=/app/data \
     BUNDLE_SEARXNG=true \
     SEARXNG_BASE_URL=http://127.0.0.1:8080 \
+    SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml \
     SEARXNG_BIND_ADDRESS=127.0.0.1 \
+    SEARXNG_PORT=8080 \
     USE_FETCH_QUEUE=false \
     SCANNER_MODE=run \
     DISCOVERY_PROVIDERS=searxng

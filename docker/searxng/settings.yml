@@ -1,15 +1,16 @@
-# Community Scanner
+# Warmr community scanner — bundled SearXNG settings
 
 use_default_settings: true
+
+server:
+  secret_key: "warmr-scanner-change-in-production"
+  limiter: false
+  image_proxy: false
 
 search:
   formats:
     - html
     - json
-
-server:
-  limiter: false
-  image_proxy: false
 
 engines:
   - name: duckduckgo
