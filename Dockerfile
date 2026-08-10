@@ -1,6 +1,7 @@
-# All-in-one: scanner + SearXNG on Debian (python:3.10-slim).
+# All-in-one: scanner + SearXNG on Debian.
 # Official searxng/searxng image is Wolfi (no apt/apk) — run SearXNG from source clone.
-FROM python:3.10-slim
+# Python 3.11+ required (SearXNG imports tomllib).
+FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
