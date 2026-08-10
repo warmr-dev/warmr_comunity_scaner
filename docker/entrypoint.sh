@@ -9,57 +9,73 @@ cd /app
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"
 : "${USE_FETCH_QUEUE:=false}"
+: "${NICHE_PAUSE_SECONDS:=20}"
 
-NICE_ARGS="${PIPE_NICHE:-business}"
+# PIPE_NICHES takes priority (comma-separated). Fallback: single PIPE_NICHE.
+if [ -n "${PIPE_NICHES:-}" ]; then
+  NICHES="$PIPE_NICHES"
+else
+  NICHES="${PIPE_NICHE:-business}"
+fi
+
 GEO_ARGS="${PIPE_GEO:-USA}"
-QUERIES_ARGS="${PIPE_QUERIES:-20}"
-PER_QUERY_ARGS="${PIPE_PER_QUERY:-30}"
+AUDIENCE_ARGS="${PIPE_AUDIENCE:-professionals}"
+QUERIES_ARGS="${PIPE_QUERIES:-12}"
+PER_QUERY_ARGS="${PIPE_PER_QUERY:-20}"
 MAX_FETCH_ARGS="${PIPE_MAX_FETCH:-500}"
 WORKER_MAX_ITEMS_ARGS="${WORKER_MAX_ITEMS:-100000}"
 
 community-scanner init-db
 
-run_discovery() {
-  if [ "$USE_FETCH_QUEUE" = "true" ]; then
+run_one_niche() {
+  niche="$1"
+  echo "=== niche=${niche} geo=${GEO_ARGS} ==="
+  if [ "$USE_FETCH_QUEUE" = "true" ] && [ "$SCANNER_MODE" = "discovery" ]; then
     community-scanner discover \
-      --niche "$NICE_ARGS" \
+      --niche "$niche" \
       --geo "$GEO_ARGS" \
+      --audience "$AUDIENCE_ARGS" \
       --queries "$QUERIES_ARGS" \
       --per-query "$PER_QUERY_ARGS"
   else
     community-scanner run \
-      --niche "$NICE_ARGS" \
+      --niche "$niche" \
       --geo "$GEO_ARGS" \
+      --audience "$AUDIENCE_ARGS" \
       --queries "$QUERIES_ARGS" \
       --per-query "$PER_QUERY_ARGS" \
       --max-fetch "$MAX_FETCH_ARGS"
   fi
 }
 
-run_worker() {
-  community-scanner worker --max-items "$WORKER_MAX_ITEMS_ARGS"
+run_all_niches() {
+  OLD_IFS=$IFS
+  IFS=,
+  # shellcheck disable=SC2086
+  set -- $NICHES
+  IFS=$OLD_IFS
+  first=1
+  for niche in "$@"; do
+    niche=$(echo "$niche" | tr -d ' ')
+    [ -z "$niche" ] && continue
+    if [ "$first" -eq 0 ] && [ "$NICHE_PAUSE_SECONDS" -gt 0 ]; then
+      echo "pause ${NICHE_PAUSE_SECONDS}s between niches (rate-limit protection)"
+      sleep "$NICHE_PAUSE_SECONDS"
+    fi
+    first=0
+    run_one_niche "$niche"
+  done
 }
 
 case "$SCANNER_MODE" in
-  discovery)
-    run_discovery
+  discovery|run|full)
+    run_all_niches
+    if [ "$SCANNER_MODE" = "full" ] && [ "$USE_FETCH_QUEUE" = "true" ]; then
+      community-scanner worker --max-items "$WORKER_MAX_ITEMS_ARGS"
+    fi
     ;;
   worker)
-    run_worker
-    ;;
-  run)
-    community-scanner run \
-      --niche "$NICE_ARGS" \
-      --geo "$GEO_ARGS" \
-      --queries "$QUERIES_ARGS" \
-      --per-query "$PER_QUERY_ARGS" \
-      --max-fetch "$MAX_FETCH_ARGS"
-    ;;
-  full)
-    run_discovery
-    if [ "$USE_FETCH_QUEUE" = "true" ]; then
-      run_worker
-    fi
+    community-scanner worker --max-items "$WORKER_MAX_ITEMS_ARGS"
     ;;
   *)
     echo "Unknown SCANNER_MODE=$SCANNER_MODE (use full|discovery|worker|run)" >&2
