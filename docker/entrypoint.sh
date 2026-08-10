@@ -9,7 +9,7 @@ cd /app
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"
 : "${USE_FETCH_QUEUE:=false}"
-: "${NICHE_PAUSE_SECONDS:=12}"
+: "${NICHE_PAUSE_SECONDS:=45}"
 : "${PIPE_NICHES:=auto}"
 
 resolve_niches() {
@@ -77,7 +77,9 @@ run_all_niches() {
       sleep "$NICHE_PAUSE_SECONDS"
     fi
     first=0
-    run_one_niche "$niche"
+    if ! run_one_niche "$niche"; then
+      echo "WARN: niche=${niche} failed; continuing"
+    fi
   done
 }
 

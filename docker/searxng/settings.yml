@@ -21,24 +21,23 @@ search:
     - html
     - json
 
-# Prefer engines that work better from datacenter IPs (DDG often CAPTCHA).
+# Bing only — Brave/Mojeek rate-limit Railway IPs within minutes.
 engines:
   - name: duckduckgo
     disabled: true
   - name: brave
-    disabled: false
-    weight: 1.2
+    disabled: true
   - name: bing
     disabled: false
-    weight: 1.2
+    weight: 1.5
   - name: wikipedia
-    disabled: false
+    disabled: true
   - name: mojeek
-    disabled: false
+    disabled: true
   - name: startpage
     disabled: true
 
 outgoing:
-  request_timeout: 8.0
-  max_request_timeout: 15.0
+  request_timeout: 12.0
+  max_request_timeout: 20.0
   useragent_suffix: " WarmrScanner/0.1"

@@ -66,8 +66,20 @@ def run_discovery(
     workers = min(settings.discovery_concurrency, len(tasks))
     # Space out SearXNG queries — cloud IPs get rate-limited quickly.
     delay = max(0.0, settings.crawl_download_delay_seconds)
-    if "searxng" in settings.discovery_provider_list and delay <= 0:
-        delay = 1.5
+    if "searxng" in settings.discovery_provider_list and delay < 2.0:
+        delay = 2.5
+
+    # Sequential when concurrency=1 (recommended): one query at a time with pause.
+    if workers <= 1:
+        for provider, query in tasks:
+            for hit in _search_safe(provider, query, per_query):
+                if hit.url in seen_urls:
+                    continue
+                seen_urls.add(hit.url)
+                hits.append(hit)
+            if delay > 0:
+                time.sleep(delay)
+        return hits
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {}

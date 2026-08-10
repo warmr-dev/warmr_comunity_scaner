@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy.orm import Session
@@ -25,6 +27,86 @@ from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
 from community_scanner.store import save_discovery_hits, upsert_community
 
 USER_AGENT = "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
+log = logging.getLogger(__name__)
+
+
+def _start_run(session: Session) -> str:
+    """Create pipeline_runs row and detach it so mid-run truncates cannot poison flush."""
+    run = PipelineRunRow(status="running", metrics={})
+    session.add(run)
+    session.commit()
+    run_id = str(run.id)
+    session.expunge(run)
+    return run_id
+
+
+def _finalize_run(
+    session: Session,
+    run_id: str,
+    *,
+    status: str,
+    metrics: PipelineMetrics,
+    error: str | None = None,
+) -> str:
+    """Commit work + run status; survive deleted pipeline_runs rows."""
+    finished = datetime.now(timezone.utc)
+    metrics_dict = metrics.as_dict()
+
+    if status == "success":
+        try:
+            session.commit()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Commit of pipeline work failed: %s", exc)
+            try:
+                session.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+    else:
+        try:
+            session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+    try:
+        run = session.get(PipelineRunRow, run_id)
+        if run is None:
+            run = PipelineRunRow(
+                id=run_id,
+                status=status,
+                finished_at=finished,
+                metrics=metrics_dict,
+                error=error,
+            )
+            session.add(run)
+        else:
+            run.status = status
+            run.finished_at = finished
+            run.metrics = metrics_dict
+            run.error = error
+        session.commit()
+        return run_id
+    except Exception as finalize_exc:  # noqa: BLE001
+        log.warning("Could not finalize pipeline_runs row %s: %s", run_id, finalize_exc)
+        try:
+            session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            session.add(
+                PipelineRunRow(
+                    status=status,
+                    finished_at=finished,
+                    metrics=metrics_dict,
+                    error=error,
+                )
+            )
+            session.commit()
+        except Exception:  # noqa: BLE001
+            try:
+                session.rollback()
+            except Exception:  # noqa: BLE001
+                pass
+        return run_id
 
 
 @dataclass
@@ -271,9 +353,7 @@ def run_discovery_only(
     enqueue_all: bool = True,
 ) -> PipelineResult:
     metrics = PipelineMetrics(queries_estimated=query_limit)
-    run = PipelineRunRow(status="running", metrics={})
-    session.add(run)
-    session.commit()
+    run_id = _start_run(session)
 
     try:
         hits, key_by_url, unique_candidates, metrics = discover_candidates(
@@ -292,21 +372,10 @@ def run_discovery_only(
             ]
             metrics.enqueued = enqueue_fetch_jobs(settings, jobs)
 
-        from datetime import datetime, timezone
-
-        run.status = "success"
-        run.finished_at = datetime.now(timezone.utc)
-        run.metrics = metrics.as_dict()
-        session.commit()
-        return PipelineResult(metrics=metrics, run_id=run.id)
+        _finalize_run(session, run_id, status="success", metrics=metrics)
+        return PipelineResult(metrics=metrics, run_id=run_id)
     except Exception as exc:  # noqa: BLE001
-        from datetime import datetime, timezone
-
-        run.status = "error"
-        run.error = str(exc)
-        run.finished_at = datetime.now(timezone.utc)
-        run.metrics = metrics.as_dict()
-        session.commit()
+        _finalize_run(session, run_id, status="error", metrics=metrics, error=str(exc))
         raise
 
 
@@ -320,9 +389,7 @@ def run_fetch_worker(
     from community_scanner.queue import dequeue_fetch_jobs
 
     metrics = PipelineMetrics()
-    run = PipelineRunRow(status="running", metrics={})
-    session.add(run)
-    session.commit()
+    run_id = _start_run(session)
 
     llm_on = settings.llm_enabled if use_llm is None else use_llm
     budget = max_items if max_items is not None else settings.worker_max_items
@@ -349,21 +416,10 @@ def run_fetch_worker(
             session.commit()
             processed += len(candidates)
 
-        from datetime import datetime, timezone
-
-        run.status = "success"
-        run.finished_at = datetime.now(timezone.utc)
-        run.metrics = metrics.as_dict()
-        session.commit()
-        return PipelineResult(metrics=metrics, run_id=run.id)
+        _finalize_run(session, run_id, status="success", metrics=metrics)
+        return PipelineResult(metrics=metrics, run_id=run_id)
     except Exception as exc:  # noqa: BLE001
-        from datetime import datetime, timezone
-
-        run.status = "error"
-        run.error = str(exc)
-        run.finished_at = datetime.now(timezone.utc)
-        run.metrics = metrics.as_dict()
-        session.commit()
+        _finalize_run(session, run_id, status="error", metrics=metrics, error=str(exc))
         raise
 
 
@@ -378,9 +434,7 @@ def run_pipeline(
     use_llm: bool | None = None,
 ) -> PipelineResult:
     metrics = PipelineMetrics(queries_estimated=query_limit)
-    run = PipelineRunRow(status="running", metrics={})
-    session.add(run)
-    session.commit()
+    run_id = _start_run(session)
 
     try:
         hits, key_by_url, unique_candidates, metrics = discover_candidates(
@@ -412,19 +466,8 @@ def run_pipeline(
             ]
             metrics.enqueued = enqueue_fetch_jobs(settings, jobs)
 
-        from datetime import datetime, timezone
-
-        run.status = "success"
-        run.finished_at = datetime.now(timezone.utc)
-        run.metrics = metrics.as_dict()
-        session.commit()
-        return PipelineResult(metrics=metrics, run_id=run.id)
+        _finalize_run(session, run_id, status="success", metrics=metrics)
+        return PipelineResult(metrics=metrics, run_id=run_id)
     except Exception as exc:  # noqa: BLE001
-        from datetime import datetime, timezone
-
-        run.status = "error"
-        run.error = str(exc)
-        run.finished_at = datetime.now(timezone.utc)
-        run.metrics = metrics.as_dict()
-        session.commit()
+        _finalize_run(session, run_id, status="error", metrics=metrics, error=str(exc))
         raise

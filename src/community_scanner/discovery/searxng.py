@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from community_scanner.discovery.base import DiscoveryProvider
@@ -13,38 +15,52 @@ class SearxngProvider(DiscoveryProvider):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.language = language
+        # Bing is the most reliable public engine from Railway/datacenter IPs.
+        # Brave/Mojeek hit 429/timeout within minutes and poison the run.
+        self.engines = "bing"
+        self._cooldown_until = 0.0
 
     def search(self, query: str, count: int = 10) -> list[DiscoveryHit]:
         hits: list[DiscoveryHit] = []
         page = 1
         max_pages = max(1, (count + 9) // 10)
-        # Prefer engines that work from cloud IPs (DuckDuckGo often CAPTCHA).
-        engines = "bing,brave,mojeek"
+        empty_streak = 0
 
         with httpx.Client(timeout=self.timeout) as client:
             while len(hits) < count and page <= max_pages:
+                now = time.monotonic()
+                if now < self._cooldown_until:
+                    time.sleep(self._cooldown_until - now)
+
                 params = {
                     "q": query,
                     "format": "json",
                     "pageno": page,
                     "language": self.language,
-                    "engines": engines,
+                    "engines": self.engines,
                 }
                 resp = client.get(f"{self.base_url}/search", params=params)
                 resp.raise_for_status()
                 data = resp.json()
 
                 results = data.get("results") or []
+                unresponsive = data.get("unresponsive_engines") or []
                 if not results:
-                    # Surface CAPTCHA / engine failures in Railway logs
-                    unresponsive = data.get("unresponsive_engines") or []
+                    empty_streak += 1
                     if unresponsive:
                         print(
                             f"searxng empty for q={query!r} page={page}: {unresponsive}",
                             flush=True,
                         )
-                    break
+                        # Back off hard when engines are rate-limited.
+                        self._cooldown_until = time.monotonic() + min(60.0, 8.0 * empty_streak)
+                        time.sleep(min(20.0, 4.0 * empty_streak))
+                    if empty_streak >= 2:
+                        break
+                    page += 1
+                    continue
 
+                empty_streak = 0
                 for item in results:
                     url = item.get("url")
                     if not url:
@@ -61,5 +77,7 @@ class SearxngProvider(DiscoveryProvider):
                     if len(hits) >= count:
                         break
                 page += 1
+                if page <= max_pages and len(hits) < count:
+                    time.sleep(1.0)
 
         return hits[:count]
