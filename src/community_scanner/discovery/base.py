@@ -15,28 +15,29 @@ class QueryParams:
     community_type: str | None = None
 
 
-# USA-focused discovery templates ({geo} defaults to USA).
+# High-signal USA community discovery templates.
+# Avoid bare "paid" / "professional" — they pollute SERP with dictionaries.
 USA_TEMPLATES = [
-    "{niche} {geo} community",
-    "{niche} {geo} professional network",
-    "best {niche} communities {geo}",
-    "{audience} {niche} forum {geo}",
-    "{niche} association {geo}",
-    "paid {niche} community {geo}",
-    "professional {niche} community {geo}",
-    "{niche} founders community {geo}",
-    "{niche} membership club {geo}",
-    "site:skool.com {niche} {geo}",
-    "site:circle.so {niche} {geo}",
-    "site:mightynetworks.com {niche} {geo}",
-    "{niche} community for {audience} {geo}",
-    "private {niche} community paid {geo}",
-    "{niche} peer group membership {geo}",
-    "{niche} mastermind community {geo}",
-    "{niche} slack community {geo}",
-    "{niche} discord server {geo}",
-    "executive {niche} community {geo}",
-    "{niche} united states membership community",
+    "site:skool.com {niche}",
+    "site:circle.so {niche}",
+    "site:mightynetworks.com {niche}",
+    "site:discord.gg {niche}",
+    '"{niche}" membership community {geo}',
+    '"{niche}" online community {geo}',
+    '"{niche}" forum community {geo}',
+    "{niche} association members {geo}",
+    "{niche} chapter network {geo}",
+    "{niche} mastermind group {geo}",
+    "{niche} peer advisory group {geo}",
+    "{niche} founders community slack",
+    "{niche} founders community discord",
+    "{niche} professionals community skool",
+    "{niche} membership club apply {geo}",
+    "best {niche} online communities {geo} skool OR circle OR discord",
+    "{niche} trade association {geo}",
+    "{niche} industry association {geo}",
+    "{audience} {niche} community membership",
+    "{niche} community of practice {geo}",
 ]
 
 

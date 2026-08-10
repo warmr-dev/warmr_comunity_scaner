@@ -9,12 +9,24 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
 
     Warmr gold etalons (Hampton, Ramen Club, Chief, ...) force high tier.
     """
+    from community_scanner.normalize import JUNK_HINTS, looks_like_community
+
     score = 0
     signals: dict = dict(item.raw_signals)
 
     if item.access_status == AccessStatus.REJECT:
         item.value_score = 0
         item.value_tier = ValueTier.JUNK
+        return item
+
+    # Reject dictionary / tax-software / explainer SERP noise after fetch
+    blob = " ".join(filter(None, [item.name, item.website, item.join_url]))
+    if JUNK_HINTS.search(blob) and not looks_like_community(item.website, item.name, None):
+        item.access_status = AccessStatus.REJECT
+        item.value_tier = ValueTier.JUNK
+        item.value_score = 0
+        signals["reject_reason"] = "junk_serp"
+        item.raw_signals = signals
         return item
 
     etalon = match_etalon(item.name, item.website, item.platform_id)

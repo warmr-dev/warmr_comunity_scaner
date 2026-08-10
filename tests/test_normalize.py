@@ -1,4 +1,4 @@
-from community_scanner.normalize import normalize_url
+from community_scanner.normalize import looks_like_community, normalize_url
 from community_scanner.models import Platform
 
 
@@ -18,6 +18,12 @@ def test_discord_platform_id():
     assert not n.is_blocked
 
 
+def test_discord_home_blocked():
+    n = normalize_url("https://discordapp.com/")
+    assert n.is_blocked
+    assert n.block_reason == "missing_platform_id"
+
+
 def test_skool_platform_id():
     n = normalize_url("https://www.skool.com/florida-cpa/about")
     assert n.platform == Platform.SKOOL
@@ -35,3 +41,32 @@ def test_same_domain_different_communities():
 def test_blocked_google():
     n = normalize_url("https://www.google.com/search?q=test")
     assert n.is_blocked
+
+
+def test_blocked_dictionary():
+    n = normalize_url("https://www.merriam-webster.com/dictionary/professional")
+    assert n.is_blocked
+
+
+def test_looks_like_community_positive():
+    assert looks_like_community(
+        "https://accountantforums.com/",
+        "Accountant Forums",
+        "Join the accounting community",
+    )
+
+
+def test_looks_like_community_rejects_dictionary():
+    assert not looks_like_community(
+        "https://dictionary.com/browse/professional",
+        "professional definition",
+        "Meaning of professional",
+    )
+
+
+def test_looks_like_community_rejects_payed_vs_paid():
+    assert not looks_like_community(
+        "https://grammarly.com/blog/paid-payed",
+        "Payed vs Paid",
+        "What's the correct spelling?",
+    )

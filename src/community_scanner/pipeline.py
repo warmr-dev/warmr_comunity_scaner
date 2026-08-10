@@ -20,7 +20,7 @@ from community_scanner.models import (
     Platform,
     ValueTier,
 )
-from community_scanner.normalize import normalize_url
+from community_scanner.normalize import looks_like_community, normalize_url
 from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
 from community_scanner.store import save_discovery_hits, upsert_community
 
@@ -33,11 +33,13 @@ class PipelineMetrics:
     discovery_hits: int = 0
     normalized: int = 0
     blocked: int = 0
+    quality_rejected: int = 0
     fetched: int = 0
     fetch_errors: int = 0
     upserted_new: int = 0
     upserted_changed: int = 0
     upserted_unchanged: int = 0
+    skipped_junk: int = 0
     llm_calls: int = 0
     enqueued: int = 0
 
@@ -207,6 +209,17 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
+        # Do not pollute inventory with reject/junk SERP noise
+        if outcome.item.access_status == AccessStatus.REJECT or outcome.item.value_tier == ValueTier.JUNK:
+            metrics.skipped_junk += 1
+            continue
+        # Skip bare fetch-error stubs with no community signal
+        if outcome.item.raw_signals.get("fetch_error") and not looks_like_community(
+            outcome.item.website, outcome.item.name, None
+        ):
+            metrics.skipped_junk += 1
+            continue
+
         _, created, changed = upsert_community(session, outcome.item)
         if created:
             metrics.upserted_new += 1
@@ -233,6 +246,9 @@ def discover_candidates(
         norm = normalize_url(hit.url)
         if norm.is_blocked:
             metrics.blocked += 1
+            continue
+        if not looks_like_community(hit.url, hit.title, hit.snippet):
+            metrics.quality_rejected += 1
             continue
         metrics.normalized += 1
         key_by_url[hit.url] = norm.canonical_key
