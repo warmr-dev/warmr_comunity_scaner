@@ -15,9 +15,8 @@ class SearxngProvider(DiscoveryProvider):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.language = language
-        # Bing is the most reliable public engine from Railway/datacenter IPs.
-        # Brave/Mojeek hit 429/timeout within minutes and poison the run.
-        self.engines = "bing"
+        # Bing primary; Yahoo as secondary for more SERP diversity from cloud IPs.
+        self.engines = "bing,yahoo"
         self._cooldown_until = 0.0
 
     def search(self, query: str, count: int = 10) -> list[DiscoveryHit]:
@@ -30,7 +29,7 @@ class SearxngProvider(DiscoveryProvider):
             while len(hits) < count and page <= max_pages:
                 now = time.monotonic()
                 if now < self._cooldown_until:
-                    time.sleep(self._cooldown_until - now)
+                    time.sleep(min(5.0, self._cooldown_until - now))
 
                 params = {
                     "q": query,
@@ -52,9 +51,9 @@ class SearxngProvider(DiscoveryProvider):
                             f"searxng empty for q={query!r} page={page}: {unresponsive}",
                             flush=True,
                         )
-                        # Back off hard when engines are rate-limited.
-                        self._cooldown_until = time.monotonic() + min(60.0, 8.0 * empty_streak)
-                        time.sleep(min(20.0, 4.0 * empty_streak))
+                        # Short backoff — volume run cannot afford 20–60s sleeps.
+                        self._cooldown_until = time.monotonic() + min(12.0, 2.0 * empty_streak)
+                        time.sleep(min(3.0, 1.0 * empty_streak))
                     if empty_streak >= 2:
                         break
                     page += 1
@@ -78,6 +77,6 @@ class SearxngProvider(DiscoveryProvider):
                         break
                 page += 1
                 if page <= max_pages and len(hits) < count:
-                    time.sleep(1.0)
+                    time.sleep(0.35)
 
         return hits[:count]

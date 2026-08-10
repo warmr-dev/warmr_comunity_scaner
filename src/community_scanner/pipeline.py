@@ -22,7 +22,7 @@ from community_scanner.models import (
     Platform,
     ValueTier,
 )
-from community_scanner.normalize import normalize_url
+from community_scanner.normalize import JUNK_HINTS, normalize_url
 from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
 from community_scanner.store import save_discovery_hits, upsert_community
 
@@ -283,6 +283,60 @@ def job_to_models(job: dict) -> tuple[DiscoveryHit, NormalizedUrl, str]:
     return hit, norm, job.get("geo") or "USA"
 
 
+def _stub_from_serp(
+    hit: DiscoveryHit,
+    norm: NormalizedUrl,
+    *,
+    scan_geo: str,
+    niche: str | None = None,
+) -> ExtractedCommunity:
+    """Persist SERP hit immediately (no fetch) for volume toward 10k rows."""
+    junk = bool(
+        JUNK_HINTS.search(" ".join(filter(None, [hit.url, hit.title or "", hit.snippet or ""])))
+    )
+    return ExtractedCommunity(
+        website=norm.website,
+        canonical_key=norm.canonical_key,
+        canonical_domain=norm.canonical_domain,
+        platform=norm.platform,
+        platform_id=norm.platform_id,
+        name=hit.title or norm.canonical_domain,
+        niche=niche,
+        geo=scan_geo,
+        access_status=AccessStatus.WATCH,
+        value_tier=ValueTier.JUNK if junk else ValueTier.LOW,
+        value_score=0 if junk else 15,
+        source_queries=[hit.query] if hit.query else [],
+        raw_signals={
+            "serp_stub": True,
+            "snippet": hit.snippet,
+            "provider": hit.provider,
+        },
+        needs_llm=False,
+    )
+
+
+def apply_serp_stubs(
+    session: Session,
+    candidates: list[tuple[DiscoveryHit, NormalizedUrl]],
+    metrics: PipelineMetrics,
+    *,
+    scan_geo: str,
+    niche: str | None = None,
+) -> None:
+    for hit, norm in candidates:
+        item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
+        if item.value_tier == ValueTier.JUNK:
+            metrics.skipped_junk += 1
+        _, created, changed = upsert_community(session, item)
+        if created:
+            metrics.upserted_new += 1
+        elif changed:
+            metrics.upserted_changed += 1
+        else:
+            metrics.upserted_unchanged += 1
+
+
 def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: PipelineMetrics) -> None:
     for outcome in outcomes:
         if outcome.fetched:
@@ -291,9 +345,8 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        # Quantity-first: always upsert. Junk/reject stay in DB with tier/status flags.
         if outcome.item.access_status == AccessStatus.REJECT or outcome.item.value_tier == ValueTier.JUNK:
-            metrics.skipped_junk += 1  # counted for metrics only; still saved
+            metrics.skipped_junk += 1
 
         _, created, changed = upsert_community(session, outcome.item)
         if created:
@@ -318,23 +371,12 @@ def discover_candidates(
     key_by_url: dict[str, str] = {}
     candidates: list[tuple[DiscoveryHit, NormalizedUrl]] = []
     for hit in hits:
+        if not hit.url or hit.url.startswith(("javascript:", "mailto:", "tel:")):
+            continue
         norm = normalize_url(hit.url)
-        # Only skip hard-blocked hosts (google, dictionaries, …). Soft quality filter disabled.
-        if norm.is_blocked and norm.block_reason == "blocked_domain":
+        if norm.is_blocked:
             metrics.blocked += 1
             continue
-        # missing_platform_id / soft blocks: keep and fetch for volume
-        if norm.is_blocked:
-            metrics.quality_rejected += 1
-            # Re-open as fetchable site:domain row
-            norm = norm.model_copy(
-                update={
-                    "is_blocked": False,
-                    "block_reason": None,
-                    "canonical_key": f"site:{norm.canonical_domain}",
-                    "platform_id": norm.platform_id,
-                }
-            )
         metrics.normalized += 1
         key_by_url[hit.url] = norm.canonical_key
         candidates.append((hit, norm))
@@ -450,6 +492,17 @@ def run_pipeline(
 
         llm_on = settings.llm_enabled if use_llm is None else use_llm
         scan_geo = resolve_geo(params.geo)
+
+        # Volume: write every unique SERP hit immediately, then enrich via fetch.
+        apply_serp_stubs(
+            session,
+            unique_candidates,
+            metrics,
+            scan_geo=scan_geo,
+            niche=params.niche,
+        )
+        session.commit()
+
         inline = unique_candidates[:max_fetch]
         overflow = unique_candidates[max_fetch:]
 

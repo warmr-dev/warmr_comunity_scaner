@@ -22,6 +22,8 @@ USA_TEMPLATES = [
     "site:circle.so {niche}",
     "site:mightynetworks.com {niche}",
     "site:discord.gg {niche}",
+    "site:facebook.com/groups {niche}",
+    "site:linkedin.com/groups {niche}",
     '"{niche}" membership community {geo}',
     '"{niche}" online community {geo}',
     '"{niche}" forum community {geo}',
@@ -38,6 +40,14 @@ USA_TEMPLATES = [
     "{niche} industry association {geo}",
     "{audience} {niche} community membership",
     "{niche} community of practice {geo}",
+    "{niche} private community {geo}",
+    "{niche} paid community {geo}",
+    "{niche} networking group {geo}",
+    "{niche} slack community {geo}",
+    "{niche} discord community {geo}",
+    "{niche} facebook group {geo}",
+    "{niche} meetup group {geo}",
+    "top {niche} communities {geo}",
 ]
 
 

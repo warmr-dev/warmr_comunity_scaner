@@ -21,7 +21,6 @@ search:
     - html
     - json
 
-# Bing only — Brave/Mojeek rate-limit Railway IPs within minutes.
 engines:
   - name: duckduckgo
     disabled: true
@@ -30,6 +29,9 @@ engines:
   - name: bing
     disabled: false
     weight: 1.5
+  - name: yahoo
+    disabled: false
+    weight: 1.0
   - name: wikipedia
     disabled: true
   - name: mojeek
@@ -38,6 +40,6 @@ engines:
     disabled: true
 
 outgoing:
-  request_timeout: 12.0
-  max_request_timeout: 20.0
+  request_timeout: 10.0
+  max_request_timeout: 15.0
   useragent_suffix: " WarmrScanner/0.1"

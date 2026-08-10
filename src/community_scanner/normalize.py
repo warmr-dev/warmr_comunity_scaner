@@ -5,9 +5,9 @@ from urllib.parse import urlparse, urlunparse
 
 from community_scanner.models import NormalizedUrl, Platform
 
-# Domains that are never professional communities for Warmr inventory.
+# Volume mode: only skip pure search engines / video hosts (not useful as communities).
+# Everything else is kept and written to community_scanner (junk flagged later).
 BLOCKED_DOMAINS = {
-    # Search / social noise
     "google.com",
     "google.co.uk",
     "bing.com",
@@ -15,84 +15,12 @@ BLOCKED_DOMAINS = {
     "duckduckgo.com",
     "youtube.com",
     "youtu.be",
-    "x.com",
-    "twitter.com",
-    "instagram.com",
-    "tiktok.com",
-    "pinterest.com",
-    "reddit.com",
-    # Retail / travel / consumer
-    "amazon.com",
-    "amazon.co.uk",
-    "bestbuy.com",
-    "ebay.com",
-    "walmart.com",
-    "target.com",
-    "bestwestern.com",
-    "booking.com",
-    "airbnb.com",
-    "expedia.com",
-    # Dictionaries / language tools (SERP traps for "paid" / "professional")
-    "dictionary.com",
-    "merriam-webster.com",
-    "thesaurus.com",
-    "vocabulary.com",
-    "cambridge.org",
-    "oxfordlearnersdictionaries.com",
-    "collinsdictionary.com",
-    "thefreedictionary.com",
-    "wordreference.com",
-    "britannica.com",
-    "grammarly.com",
-    "grammarbrain.com",
-    "grammarnestly.com",
-    "sapling.ai",
-    "usdictionary.com",
-    "wordplays.com",
-    # Generic knowledge / wiki
-    "wikipedia.org",
-    "wiktionary.org",
     "baidu.com",
-    "zhihu.com",
-    "quora.com",
-    # Tax software / gov portals (not communities)
-    "turbotax.intuit.com",
-    "intuit.com",
-    "hrblock.com",
-    "taxslayer.com",
-    "irs.gov",
-    "incometax.gov.in",
-    "tax.ny.gov",
-    # Dev docs / placeholder SERP junk
-    "select2.org",
-    "tanstack.com",
-    "sveltequery.vercel.app",
-    "vue-query-next-gen.vercel.app",
-    "webqc.org",
-    "strawpoll.com",
-    "lipsumhub.com",
-    # News / explainers often mistaken for communities
-    "forbes.com",
-    "investopedia.com",
-    "netsuite.com",
-    "corporatefinanceinstitute.com",
-    "accountingcoach.com",
-    "accountingverse.com",
-    "accountingforeveryone.com",
 }
 
-# Substrings in host that usually mean junk SERP
 BLOCKED_HOST_SUBSTRINGS = (
-    "dictionary",
-    "thesaurus",
-    "grammar",
-    "translate",
-    "tripadvisor",
-    "yelp.",
-    "opentable",
-    "restaurant",
-    "booking.",
-    "weather",
+    "google.",
+    "bing.",
 )
 
 # Positive signals: URL/title/snippet should look like a community/association.
@@ -154,7 +82,6 @@ def extract_platform_id(platform: Platform, domain: str, path: str) -> str | Non
             idx = parts.index("invite")
             if idx + 1 < len(parts):
                 return parts[idx + 1].split("?")[0]
-        # Bare discord.com / discordapp.com home → no id
         if domain in {"discord.com", "discordapp.com"} and not parts:
             return None
         return parts[0] if parts else None
@@ -219,7 +146,6 @@ def looks_like_community(url: str, title: str | None = None, snippet: str | None
         return False
     if COMMUNITY_HINTS.search(blob):
         return True
-    # Shared platforms with path/id already validated in normalize_url
     host = _strip_www(urlparse(url if "://" in url else f"https://{url}").netloc)
     platform = detect_platform(host)
     return platform != Platform.CUSTOM
@@ -239,14 +165,13 @@ def normalize_url(url: str) -> NormalizedUrl:
 
     platform = detect_platform(domain)
     platform_id = extract_platform_id(platform, domain, clean_path)
+    # Volume: keep platform pages even without id (canonical falls back to site:domain)
+    if platform != Platform.CUSTOM and not platform_id and clean_path not in {"", "/"}:
+        platform_id = clean_path.strip("/").split("/")[0] or None
     canonical_key = build_canonical_key(platform, domain, platform_id)
 
     blocked = _is_blocked_host(domain)
     reason = "blocked_domain" if blocked else None
-
-    if not blocked and platform != Platform.CUSTOM and not platform_id:
-        blocked = True
-        reason = "missing_platform_id"
 
     return NormalizedUrl(
         original_url=url,

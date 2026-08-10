@@ -64,10 +64,10 @@ def run_discovery(
     ]
 
     workers = min(settings.discovery_concurrency, len(tasks))
-    # Space out SearXNG queries — cloud IPs get rate-limited quickly.
+    # Fast volume mode: short gap between queries (override with CRAWL_DOWNLOAD_DELAY_SECONDS).
     delay = max(0.0, settings.crawl_download_delay_seconds)
-    if "searxng" in settings.discovery_provider_list and delay < 2.0:
-        delay = 2.5
+    if "searxng" in settings.discovery_provider_list and delay <= 0:
+        delay = 0.6
 
     # Sequential when concurrency=1 (recommended): one query at a time with pause.
     if workers <= 1:

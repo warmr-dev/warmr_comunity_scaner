@@ -9,8 +9,12 @@ cd /app
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"
 : "${USE_FETCH_QUEUE:=false}"
-: "${NICHE_PAUSE_SECONDS:=45}"
+: "${NICHE_PAUSE_SECONDS:=3}"
 : "${PIPE_NICHES:=auto}"
+: "${PIPE_QUERIES:=24}"
+: "${PIPE_PER_QUERY:=25}"
+: "${PIPE_MAX_FETCH:=80}"
+: "${NICHE_LOOPS:=1}"
 
 resolve_niches() {
   if [ "$PIPE_NICHES" != "auto" ] && [ -n "$PIPE_NICHES" ]; then
@@ -40,13 +44,13 @@ resolve_niches() {
 NICHES="$(resolve_niches)"
 GEO_ARGS="${PIPE_GEO:-USA}"
 AUDIENCE_ARGS="${PIPE_AUDIENCE:-professionals}"
-QUERIES_ARGS="${PIPE_QUERIES:-10}"
-PER_QUERY_ARGS="${PIPE_PER_QUERY:-20}"
-MAX_FETCH_ARGS="${PIPE_MAX_FETCH:-1500}"
+QUERIES_ARGS="${PIPE_QUERIES}"
+PER_QUERY_ARGS="${PIPE_PER_QUERY}"
+MAX_FETCH_ARGS="${PIPE_MAX_FETCH}"
 WORKER_MAX_ITEMS_ARGS="${WORKER_MAX_ITEMS:-100000}"
 
 NICHE_COUNT=$(echo "$NICHES" | tr ',' '\n' | sed '/^\s*$/d' | wc -l | tr -d ' ')
-echo "USA niches queued: ${NICHE_COUNT}"
+echo "USA niches queued: ${NICHE_COUNT} loops=${NICHE_LOOPS}"
 
 community-scanner init-db
 
@@ -85,7 +89,12 @@ run_all_niches() {
 
 case "$SCANNER_MODE" in
   discovery|run|full)
-    run_all_niches
+    loop=1
+    while [ "$loop" -le "$NICHE_LOOPS" ]; do
+      echo "=== niche loop ${loop}/${NICHE_LOOPS} ==="
+      run_all_niches
+      loop=$((loop + 1))
+    done
     if [ "$SCANNER_MODE" = "full" ] && [ "$USE_FETCH_QUEUE" = "true" ]; then
       community-scanner worker --max-items "$WORKER_MAX_ITEMS_ARGS"
     fi

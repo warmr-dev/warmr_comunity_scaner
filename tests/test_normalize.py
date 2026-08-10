@@ -18,10 +18,10 @@ def test_discord_platform_id():
     assert not n.is_blocked
 
 
-def test_discord_home_blocked():
+def test_discord_home_kept_for_volume():
     n = normalize_url("https://discordapp.com/")
-    assert n.is_blocked
-    assert n.block_reason == "missing_platform_id"
+    assert not n.is_blocked
+    assert n.canonical_key == "site:discordapp.com"
 
 
 def test_skool_platform_id():
@@ -43,9 +43,9 @@ def test_blocked_google():
     assert n.is_blocked
 
 
-def test_blocked_dictionary():
+def test_dictionary_kept_for_volume():
     n = normalize_url("https://www.merriam-webster.com/dictionary/professional")
-    assert n.is_blocked
+    assert not n.is_blocked
 
 
 def test_looks_like_community_positive():
