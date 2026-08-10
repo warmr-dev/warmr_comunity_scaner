@@ -9,43 +9,57 @@ cd /app
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"
 : "${USE_FETCH_QUEUE:=false}"
-: "${NICHE_PAUSE_SECONDS:=20}"
+: "${NICHE_PAUSE_SECONDS:=12}"
+: "${PIPE_NICHES:=auto}"
 
-# PIPE_NICHES takes priority (comma-separated). Fallback: single PIPE_NICHE.
-if [ -n "${PIPE_NICHES:-}" ]; then
-  NICHES="$PIPE_NICHES"
-else
-  NICHES="${PIPE_NICHE:-business}"
-fi
+resolve_niches() {
+  if [ "$PIPE_NICHES" != "auto" ] && [ -n "$PIPE_NICHES" ]; then
+    echo "$PIPE_NICHES"
+    return 0
+  fi
 
+  for candidate in \
+    "/app/src/community_scanner/seed_data/niches_usa.txt" \
+    "/usr/local/lib/python3.12/site-packages/community_scanner/seed_data/niches_usa.txt" \
+    "/usr/local/lib/python3.11/site-packages/community_scanner/seed_data/niches_usa.txt" \
+    "/usr/local/lib/python3.10/site-packages/community_scanner/seed_data/niches_usa.txt" \
+    "/app/data/niches_usa.txt"
+  do
+    if [ -f "$candidate" ]; then
+      echo "Loading niches from $candidate" >&2
+      # Convert newlines to commas
+      tr '\n' ',' < "$candidate" | sed 's/,$//'
+      return 0
+    fi
+  done
+
+  # Fallback single niche
+  echo "${PIPE_NICHE:-business}"
+}
+
+NICHES="$(resolve_niches)"
 GEO_ARGS="${PIPE_GEO:-USA}"
 AUDIENCE_ARGS="${PIPE_AUDIENCE:-professionals}"
-QUERIES_ARGS="${PIPE_QUERIES:-12}"
+QUERIES_ARGS="${PIPE_QUERIES:-10}"
 PER_QUERY_ARGS="${PIPE_PER_QUERY:-20}"
-MAX_FETCH_ARGS="${PIPE_MAX_FETCH:-500}"
+MAX_FETCH_ARGS="${PIPE_MAX_FETCH:-1500}"
 WORKER_MAX_ITEMS_ARGS="${WORKER_MAX_ITEMS:-100000}"
+
+NICHE_COUNT=$(echo "$NICHES" | tr ',' '\n' | sed '/^\s*$/d' | wc -l | tr -d ' ')
+echo "USA niches queued: ${NICHE_COUNT}"
 
 community-scanner init-db
 
 run_one_niche() {
   niche="$1"
   echo "=== niche=${niche} geo=${GEO_ARGS} ==="
-  if [ "$USE_FETCH_QUEUE" = "true" ] && [ "$SCANNER_MODE" = "discovery" ]; then
-    community-scanner discover \
-      --niche "$niche" \
-      --geo "$GEO_ARGS" \
-      --audience "$AUDIENCE_ARGS" \
-      --queries "$QUERIES_ARGS" \
-      --per-query "$PER_QUERY_ARGS"
-  else
-    community-scanner run \
-      --niche "$niche" \
-      --geo "$GEO_ARGS" \
-      --audience "$AUDIENCE_ARGS" \
-      --queries "$QUERIES_ARGS" \
-      --per-query "$PER_QUERY_ARGS" \
-      --max-fetch "$MAX_FETCH_ARGS"
-  fi
+  community-scanner run \
+    --niche "$niche" \
+    --geo "$GEO_ARGS" \
+    --audience "$AUDIENCE_ARGS" \
+    --queries "$QUERIES_ARGS" \
+    --per-query "$PER_QUERY_ARGS" \
+    --max-fetch "$MAX_FETCH_ARGS"
 }
 
 run_all_niches() {
@@ -56,10 +70,10 @@ run_all_niches() {
   IFS=$OLD_IFS
   first=1
   for niche in "$@"; do
-    niche=$(echo "$niche" | tr -d ' ')
+    niche=$(echo "$niche" | tr -d ' \r')
     [ -z "$niche" ] && continue
     if [ "$first" -eq 0 ] && [ "$NICHE_PAUSE_SECONDS" -gt 0 ]; then
-      echo "pause ${NICHE_PAUSE_SECONDS}s between niches (rate-limit protection)"
+      echo "pause ${NICHE_PAUSE_SECONDS}s between niches"
       sleep "$NICHE_PAUSE_SECONDS"
     fi
     first=0

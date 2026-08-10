@@ -14,4 +14,5 @@ build/
 data/*
 !data/seeds.json
 !data/warmr_gold_etalons.json
+!data/niches_usa.txt
 *.log
