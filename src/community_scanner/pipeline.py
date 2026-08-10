@@ -22,7 +22,7 @@ from community_scanner.models import (
     Platform,
     ValueTier,
 )
-from community_scanner.normalize import looks_like_community, normalize_url
+from community_scanner.normalize import normalize_url
 from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
 from community_scanner.store import save_discovery_hits, upsert_community
 
@@ -291,16 +291,9 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        # Do not pollute inventory with reject/junk SERP noise
+        # Quantity-first: always upsert. Junk/reject stay in DB with tier/status flags.
         if outcome.item.access_status == AccessStatus.REJECT or outcome.item.value_tier == ValueTier.JUNK:
-            metrics.skipped_junk += 1
-            continue
-        # Skip bare fetch-error stubs with no community signal
-        if outcome.item.raw_signals.get("fetch_error") and not looks_like_community(
-            outcome.item.website, outcome.item.name, None
-        ):
-            metrics.skipped_junk += 1
-            continue
+            metrics.skipped_junk += 1  # counted for metrics only; still saved
 
         _, created, changed = upsert_community(session, outcome.item)
         if created:
@@ -326,12 +319,22 @@ def discover_candidates(
     candidates: list[tuple[DiscoveryHit, NormalizedUrl]] = []
     for hit in hits:
         norm = normalize_url(hit.url)
-        if norm.is_blocked:
+        # Only skip hard-blocked hosts (google, dictionaries, …). Soft quality filter disabled.
+        if norm.is_blocked and norm.block_reason == "blocked_domain":
             metrics.blocked += 1
             continue
-        if not looks_like_community(hit.url, hit.title, hit.snippet):
+        # missing_platform_id / soft blocks: keep and fetch for volume
+        if norm.is_blocked:
             metrics.quality_rejected += 1
-            continue
+            # Re-open as fetchable site:domain row
+            norm = norm.model_copy(
+                update={
+                    "is_blocked": False,
+                    "block_reason": None,
+                    "canonical_key": f"site:{norm.canonical_domain}",
+                    "platform_id": norm.platform_id,
+                }
+            )
         metrics.normalized += 1
         key_by_url[hit.url] = norm.canonical_key
         candidates.append((hit, norm))
