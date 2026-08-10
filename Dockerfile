@@ -1,5 +1,5 @@
 # All-in-one: scanner + SearXNG on Debian (python:3.10-slim).
-# Official searxng/searxng image is Wolfi (no apt/apk) — install SearXNG from source instead.
+# Official searxng/searxng image is Wolfi (no apt/apk) — run SearXNG from source clone.
 FROM python:3.10-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -21,12 +21,12 @@ COPY pyproject.toml README.md ./
 COPY src ./src
 COPY docker ./docker
 
-# Clone SearXNG, install its deps first (setup.py imports msgspec), then scanner.
+# Clone SearXNG source + install its requirements (do NOT pip-install the package —
+# setup.py imports msgspec and breaks PEP 517 build isolation).
 RUN git clone --depth 1 https://github.com/searxng/searxng.git /opt/searxng \
     && pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir granian \
     && pip install --no-cache-dir -r /opt/searxng/requirements.txt \
-    && pip install --no-cache-dir --no-deps /opt/searxng \
     && pip install --no-cache-dir . \
     && mkdir -p /app/data /etc/searxng
 
