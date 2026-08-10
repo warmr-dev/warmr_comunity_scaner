@@ -1,22 +1,26 @@
 # All-in-one: bundled SearXNG + community scanner (single Railway service).
+# Base image searxng/searxng is Alpine — use apk, not apt-get.
 FROM searxng/searxng:latest
 
 USER root
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+RUN apk add --no-cache \
+    build-base \
     curl \
-    python3-pip \
-    && rm -rf /var/lib/apt/lists/*
+    python3-dev \
+    py3-pip \
+    libxml2-dev \
+    libxslt-dev \
+    libffi-dev \
+    openssl-dev
 
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY docker ./docker
 
-RUN pip3 install --no-cache-dir --break-system-packages . 2>/dev/null \
-    || pip3 install --no-cache-dir . \
+RUN pip3 install --no-cache-dir . \
     && mkdir -p /app/data
 
 COPY docker/searxng/settings.yml /etc/searxng/settings.yml
