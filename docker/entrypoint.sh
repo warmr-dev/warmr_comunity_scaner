@@ -27,8 +27,8 @@ resolve_niches() {
   do
     if [ -f "$candidate" ]; then
       echo "Loading niches from $candidate" >&2
-      # Convert newlines to commas
-      tr '\n' ',' < "$candidate" | sed 's/,$//'
+      # Convert newlines to commas; strip UTF-8 BOM / CR
+      tr -d '\r' < "$candidate" | sed '1s/^\xEF\xBB\xBF//' | tr '\n' ',' | sed 's/,$//'
       return 0
     fi
   done
