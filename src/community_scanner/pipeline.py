@@ -12,7 +12,7 @@ from community_scanner.config import Settings
 from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
-from community_scanner.invites import classify_invite_url, invite_host_ok
+from community_scanner.invites import classify_invite_url, find_invite_in_text
 from community_scanner.models import (
     AccessStatus,
     DiscoveryHit,
@@ -31,11 +31,20 @@ log = logging.getLogger(__name__)
 
 
 def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[bool, str, dict]:
-    """Validate invite shape first, then best-effort HTTP check for expired invites."""
+    """Accept invite-shaped URLs; only reject on explicit expired/invalid phrases.
+
+    Slack/Discord/WhatsApp often return 403/challenge pages to datacenter IPs — that
+    must NOT discard a correctly shaped invite.
+    """
     match = classify_invite_url(join_url)
     if not match:
         return False, "not_invite_shape", {"url": join_url[:200]}
 
+    details: dict = {
+        "platform": match.platform,
+        "rule": match.rule,
+        "canonical_join_url": match.url,
+    }
     try:
         headers = {"User-Agent": USER_AGENT}
         with httpx.Client(
@@ -47,9 +56,7 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
             resp = client.get(match.url)
             status_code = resp.status_code
             text_lc = (resp.text or "").lower()
-
-        if status_code >= 400:
-            return False, f"{match.platform}_http_error", {"status_code": status_code}
+        details["status_code"] = status_code
 
         invalid_by_platform = {
             "slack": [
@@ -76,23 +83,28 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
                 "unknown invite",
             ],
         }
-        for phrase in invalid_by_platform.get(match.platform, []):
-            if phrase in text_lc:
-                return False, f"{match.platform}_invite_invalid_phrase", {"status_code": status_code}
+        # Only trust invalid phrases when we actually got a readable success page.
+        if 200 <= status_code < 400:
+            for phrase in invalid_by_platform.get(match.platform, []):
+                if phrase in text_lc:
+                    return False, f"{match.platform}_invite_invalid_phrase", details
 
-        if not invite_host_ok(str(resp.url)):
-            # Redirected away from invite host → treat as dead.
-            return False, "redirected_off_invite_host", {"final_url": str(resp.url)[:200]}
-
-        return True, "ok", {
-            "status_code": status_code,
-            "platform": match.platform,
-            "rule": match.rule,
-            "canonical_join_url": match.url,
-        }
+        return True, "ok", details
     except Exception as exc:  # noqa: BLE001
-        # Shape matched; network failure should not discard rare good invites.
-        return True, "ok_shape_only", {"error": str(exc)[:200], "canonical_join_url": match.url}
+        details["error"] = str(exc)[:200]
+        return True, "ok_shape_only", details
+
+
+def _invite_from_hit(hit: DiscoveryHit):
+    """Prefer direct hit URL, then invite buried in title/snippet."""
+    invite = classify_invite_url(hit.url or "")
+    if invite:
+        return invite, "hit_url"
+    blob = " ".join(filter(None, [hit.title or "", hit.snippet or "", hit.url or ""]))
+    invite = find_invite_in_text(blob)
+    if invite:
+        return invite, "serp_snippet"
+    return None, None
 
 
 def _start_run(session: Session) -> str:
@@ -241,6 +253,24 @@ def _extract_and_classify(
     scan_geo: str,
 ) -> ProcessOutcome:
     item = heuristic_extract(html, norm, query=hit.query)
+    # If the SERP URL (or snippet) already is an invite, keep it even when HTML has none.
+    if not item.join_url:
+        invite, source = _invite_from_hit(hit)
+        if invite:
+            item = item.model_copy(
+                update={
+                    "join_url": invite.url,
+                    "raw_signals": {
+                        **item.raw_signals,
+                        "join_url_source": {
+                            "rule": invite.rule,
+                            "platform": invite.platform,
+                            "from": source,
+                            "hit_url": hit.url,
+                        },
+                    },
+                }
+            )
     llm_calls = 0
     if llm_on and item.needs_llm:
         llm = llm_extract_from_text(
@@ -269,11 +299,41 @@ async def _process_candidate_async(
     async with semaphore:
         if settings.crawl_download_delay_seconds > 0:
             await asyncio.sleep(settings.crawl_download_delay_seconds)
+        # Prefer the original SERP URL (invite links) over normalized website root.
+        fetch_url = hit.url or norm.website
         try:
-            resp = await client.get(norm.website)
+            resp = await client.get(fetch_url)
             resp.raise_for_status()
             html = resp.text
         except Exception as exc:  # noqa: BLE001
+            # Still salvage if the URL itself is a valid invite shape.
+            invite, source = _invite_from_hit(hit)
+            if invite:
+                item = ExtractedCommunity(
+                    website=norm.website,
+                    canonical_key=norm.canonical_key,
+                    canonical_domain=norm.canonical_domain,
+                    platform=norm.platform,
+                    platform_id=norm.platform_id,
+                    name=hit.title or norm.canonical_domain,
+                    geo=scan_geo,
+                    join_url=invite.url,
+                    access_status=AccessStatus.JOIN,
+                    value_tier=ValueTier.LOW,
+                    value_score=20,
+                    source_queries=[hit.query] if hit.query else [],
+                    raw_signals={
+                        "fetch_error": str(exc)[:200],
+                        "join_url_source": {
+                            "rule": invite.rule,
+                            "platform": invite.platform,
+                            "from": source,
+                            "hit_url": hit.url,
+                        },
+                    },
+                    needs_llm=False,
+                )
+                return ProcessOutcome(item=classify(item), fetched=False)
             return ProcessOutcome(item=_stub_from_error(hit, norm, exc, scan_geo=scan_geo), fetched=False)
 
     return _extract_and_classify(html, hit, norm, settings, llm_on=llm_on, scan_geo=scan_geo)
@@ -355,8 +415,12 @@ def _stub_from_serp(
     scan_geo: str,
     niche: str | None = None,
 ) -> ExtractedCommunity:
-    """Persist SERP hit only when the result URL itself is a direct invite."""
-    invite = classify_invite_url(hit.url or "")
+    """Persist SERP hit when URL or snippet contains a direct invite."""
+    invite, source = _invite_from_hit(hit)
+    store_norm = norm
+    if invite:
+        store_norm = normalize_url(invite.url)
+
     junk = bool(
         JUNK_HINTS.search(" ".join(filter(None, [hit.url, hit.title or "", hit.snippet or ""])))
     )
@@ -364,18 +428,18 @@ def _stub_from_serp(
     access = AccessStatus.JOIN if invite and not junk else AccessStatus.WATCH
     join_url = invite.url if invite and not junk else None
     return ExtractedCommunity(
-        website=norm.website,
-        canonical_key=norm.canonical_key,
-        canonical_domain=norm.canonical_domain,
-        platform=norm.platform,
-        platform_id=norm.platform_id,
-        name=hit.title or norm.canonical_domain,
+        website=store_norm.website,
+        canonical_key=store_norm.canonical_key,
+        canonical_domain=store_norm.canonical_domain,
+        platform=store_norm.platform,
+        platform_id=store_norm.platform_id,
+        name=hit.title or store_norm.canonical_domain,
         niche=niche,
         geo=scan_geo,
         join_url=join_url,
         access_status=access,
         value_tier=ValueTier.JUNK if junk else ValueTier.LOW,
-        value_score=0 if junk else 15,
+        value_score=0 if junk else 25,
         source_queries=[hit.query] if hit.query else [],
         raw_signals={
             "serp_stub": True,
@@ -386,6 +450,7 @@ def _stub_from_serp(
                     "join_url_source": {
                         "rule": invite.rule,
                         "platform": invite.platform,
+                        "from": source,
                         "hit_url": hit.url,
                     }
                 }
