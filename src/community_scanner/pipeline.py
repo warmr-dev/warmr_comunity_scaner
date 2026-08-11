@@ -63,13 +63,6 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
         details["status_code"] = status_code
 
         invalid_by_platform = {
-            "slack": [
-                "invite invalid",
-                "this invite may be expired",
-                "might not have permission to join",
-                "does not appear to be a valid invite",
-                "workspace not found",
-            ],
             "whatsapp": [
                 "invite link has been revoked",
                 "invite link is invalid",
@@ -79,12 +72,6 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
                 "sorry, this channel doesn't seem to exist",
                 "this invite link is invalid",
                 "invite link is invalid or has expired",
-            ],
-            "discord": [
-                "invite invalid",
-                "unable to accept invite",
-                "expired invite",
-                "unknown invite",
             ],
         }
         # Only trust invalid phrases when we actually got a readable success page.

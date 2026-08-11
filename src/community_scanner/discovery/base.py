@@ -15,32 +15,38 @@ class QueryParams:
     community_type: str | None = None
 
 
-# Prefer directories + inurl operators — Bing rarely indexes bare invite URLs in generic SERP.
+# Telegram + WhatsApp only — maximize invite/channel SERP surface.
 USA_TEMPLATES = [
-    "site:disboard.org {niche}",
-    "site:disboard.org/server {niche}",
-    "site:top.gg/servers {niche}",
-    "site:discord.me {niche}",
-    "inurl:discord.gg {niche}",
-    "inurl:discord.com/invite {niche}",
-    "inurl:chat.whatsapp.com {niche}",
-    "inurl:join.slack.com {niche}",
-    "inurl:shared_invite {niche}",
+    # Telegram directories / operators
     "site:t.me {niche}",
+    "site:telegram.me {niche}",
     "inurl:t.me {niche}",
-    '"{niche}" discord.gg/',
-    '"{niche}" chat.whatsapp.com/',
-    '"{niche}" join.slack.com/t/',
+    "inurl:t.me/+ {niche}",
+    "inurl:joinchat {niche}",
+    '"{niche}" "t.me/"',
     '"{niche}" "t.me/+"',
-    "{niche} discord server invite {geo}",
-    "{niche} slack workspace invite {geo}",
-    "{niche} telegram group {geo} t.me",
-    "{niche} whatsapp group invite {geo}",
-    "site:discord.gg {niche}",
+    '"{niche}" telegram channel',
+    '"{niche}" telegram group',
+    '"{niche}" telegram community',
+    "{niche} telegram channel {geo}",
+    "{niche} telegram group invite {geo}",
+    "{niche} telegram chat {geo}",
+    "{audience} {niche} telegram",
+    "best {niche} telegram channels",
+    "{niche} telegram list OR directory",
+    # WhatsApp
     "site:chat.whatsapp.com {niche}",
-    "site:join.slack.com {niche}",
-    "{audience} {niche} discord invite",
-    "{audience} {niche} slack invite",
+    "inurl:chat.whatsapp.com {niche}",
+    "inurl:whatsapp.com/channel {niche}",
+    '"{niche}" chat.whatsapp.com/',
+    '"{niche}" whatsapp group invite',
+    '"{niche}" whatsapp community',
+    "{niche} whatsapp group {geo}",
+    "{niche} whatsapp invite link {geo}",
+    "{niche} whatsapp channel {geo}",
+    "{audience} {niche} whatsapp group",
+    "join {niche} whatsapp group",
+    "{niche} whatsapp community invite",
 ]
 
 

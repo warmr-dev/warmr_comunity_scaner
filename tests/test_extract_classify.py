@@ -1,6 +1,6 @@
 from community_scanner.classify import classify
 from community_scanner.extract import heuristic_extract
-from community_scanner.invites import classify_invite_url
+from community_scanner.invites import classify_invite_url, find_invite_in_text
 from community_scanner.models import AccessStatus, ValueTier
 from community_scanner.normalize import normalize_url
 
@@ -19,9 +19,9 @@ HTML = """
 HTML_WITH_INVITE = """
 <html><head><title>Dev Guild</title></head>
 <body>
-<h1>Dev Guild Slack</h1>
+<h1>Dev Guild Telegram</h1>
 <p>Join our community of 2,400 members.</p>
-<a href="https://join.slack.com/t/devguild/shared_invite/zt-abc123">Join Slack</a>
+<a href="https://t.me/devguild_it">Join Telegram</a>
 </body></html>
 """
 
@@ -39,28 +39,26 @@ def test_heuristic_and_classify():
     assert item.value_tier in {ValueTier.HIGH, ValueTier.MEDIUM}
 
 
-def test_extract_slack_invite():
+def test_extract_telegram_invite():
     norm = normalize_url("https://devguild.example")
-    item = heuristic_extract(HTML_WITH_INVITE, norm, query="it slack")
-    assert item.join_url == "https://join.slack.com/t/devguild/shared_invite/zt-abc123"
-    assert item.raw_signals["join_url_source"]["platform"] == "slack"
+    item = heuristic_extract(HTML_WITH_INVITE, norm, query="it telegram")
+    assert item.join_url == "https://t.me/devguild_it"
+    assert item.raw_signals["join_url_source"]["platform"] == "telegram"
 
 
 def test_classify_invite_shapes():
-    assert classify_invite_url("https://join.slack.com/t/foo/shared_invite/zt-1")
     assert classify_invite_url("https://chat.whatsapp.com/AbCdEfGhIjK")
     assert classify_invite_url("https://t.me/+AbCdEfGhIjK")
-    assert classify_invite_url("https://discord.gg/abcdef")
-    assert classify_invite_url("discord.gg/abcdef")
-    assert classify_invite_url("https://joinhampton.slack.com")
-    assert classify_invite_url("https://slack.com") is None
+    assert classify_invite_url("https://t.me/pythondevs")
+    assert classify_invite_url("https://whatsapp.com/channel/AbCdEf")
+    # Discord / Slack disabled
+    assert classify_invite_url("https://discord.gg/abcdef") is None
+    assert classify_invite_url("https://join.slack.com/t/foo/shared_invite/zt-1") is None
     assert classify_invite_url("https://wa.me/15551234567") is None
     assert classify_invite_url("https://t.me/share") is None
 
 
-def test_find_invite_bare_discord():
-    from community_scanner.invites import find_invite_in_text
-
-    match = find_invite_in_text("Join us at discord.gg/accountingpros today")
+def test_find_invite_bare_telegram():
+    match = find_invite_in_text("Join us at t.me/accountingpros today")
     assert match is not None
-    assert match.url == "https://discord.gg/accountingpros"
+    assert match.url == "https://t.me/accountingpros"
