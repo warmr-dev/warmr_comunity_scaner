@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from typing import Any
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup
 
@@ -85,17 +86,21 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
                 join_url = href
                 break
             if "slack.com" in href_lc and ("/invite/" in href_lc or "invite" in href_lc or "join" in href_lc):
-                join_url = href
+                join_url = urljoin(f"https://{normalized.canonical_domain}", href)
                 break
             if ("wa.me" in href_lc) or ("whatsapp.com" in href_lc and ("invite" in href_lc or "join" in href_lc or "/send" in href_lc)):
-                join_url = href
+                join_url = urljoin(f"https://{normalized.canonical_domain}", href)
                 break
+
+    if join_url:
+        # Keep only non-empty URLs; normalize accidental whitespace.
+        join_url = str(join_url).strip() or None
 
     if not join_url:
         for a in soup.find_all("a", href=True):
             label = a.get_text(" ", strip=True)
             if JOIN_PATTERNS.search(label) or APPLY_PATTERNS.search(label):
-                join_url = a["href"]
+                join_url = urljoin(f"https://{normalized.canonical_domain}", str(a["href"]))
                 break
 
     emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", body, flags=re.I)
