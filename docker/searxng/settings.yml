@@ -30,7 +30,7 @@ engines:
     disabled: false
     weight: 1.5
   - name: yahoo
-    disabled: false
+    disabled: true
     weight: 1.0
   - name: wikipedia
     disabled: true

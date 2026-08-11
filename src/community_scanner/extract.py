@@ -4,10 +4,9 @@ import hashlib
 import json
 import re
 from typing import Any
-from urllib.parse import urljoin
-
 from bs4 import BeautifulSoup
 
+from community_scanner.invites import find_invite_in_text, resolve_href_invite
 from community_scanner.models import (
     AccessStatus,
     ExtractedCommunity,
@@ -75,60 +74,34 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         except ValueError:
             size_members = None
 
-    # Prefer direct invite links for Slack/WhatsApp when present.
+    # Only accept direct chat/group invite URLs (Slack / WhatsApp / Telegram / Discord).
     join_url = None
     join_url_meta: dict[str, str | None] = {}
     for a in soup.find_all("a", href=True):
         href = str(a.get("href") or "")
-        href_lc = href.lower()
         anchor_text = a.get_text(" ", strip=True) or None
-
-        # Slack invite
-        if "slack.com" in href_lc and (
-            "/invite/" in href_lc or "invite" in href_lc or "join" in href_lc
-        ):
-            join_url = urljoin(f"https://{normalized.canonical_domain}", href)
+        match = resolve_href_invite(href, base_domain=normalized.canonical_domain)
+        if match:
+            join_url = match.url
             join_url_meta = {
-                "rule": "slack_invite_href",
+                "rule": match.rule,
+                "platform": match.platform,
                 "href": href,
                 "anchor_text": anchor_text,
             }
             break
-
-        # WhatsApp invite / contact
-        if ("wa.me" in href_lc) or (
-            "whatsapp.com" in href_lc
-            and ("invite" in href_lc or "join" in href_lc or "/send" in href_lc)
-        ):
-            join_url = urljoin(f"https://{normalized.canonical_domain}", href)
-            join_url_meta = {
-                "rule": "whatsapp_invite_href",
-                "href": href,
-                "anchor_text": anchor_text,
-            }
-            break
-
-    if join_url:
-        # Keep only non-empty URLs; normalize accidental whitespace.
-        join_url = str(join_url).strip() or None
 
     if not join_url:
-        for a in soup.find_all("a", href=True):
-            href = str(a.get("href") or "")
-            href_lc = href.lower()
-            label = a.get_text(" ", strip=True) or None
-            if (
-                ("slack.com" in href_lc) or ("wa.me" in href_lc) or ("whatsapp.com" in href_lc)
-            ) and (JOIN_PATTERNS.search(label or "") or APPLY_PATTERNS.search(label or "")):
-                join_url = urljoin(
-                    f"https://{normalized.canonical_domain}", href
-                )
-                join_url_meta = {
-                    "rule": "join_label_href",
-                    "href": href,
-                    "anchor_text": label,
-                }
-                break
+        # Invite links often appear as plain text, not <a href>.
+        match = find_invite_in_text(html) or find_invite_in_text(body)
+        if match:
+            join_url = match.url
+            join_url_meta = {
+                "rule": f"{match.rule}_plaintext",
+                "platform": match.platform,
+                "href": match.url,
+                "anchor_text": None,
+            }
 
     emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", body, flags=re.I)
 

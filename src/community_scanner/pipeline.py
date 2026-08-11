@@ -7,13 +7,12 @@ from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy.orm import Session
-from urllib.parse import urlparse
-
 from community_scanner.classify import classify
 from community_scanner.config import Settings
 from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
+from community_scanner.invites import classify_invite_url, invite_host_ok
 from community_scanner.models import (
     AccessStatus,
     DiscoveryHit,
@@ -32,53 +31,68 @@ log = logging.getLogger(__name__)
 
 
 def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[bool, str, dict]:
-    """Best-effort validation for community invite links.
+    """Validate invite shape first, then best-effort HTTP check for expired invites."""
+    match = classify_invite_url(join_url)
+    if not match:
+        return False, "not_invite_shape", {"url": join_url[:200]}
 
-    We run a lightweight GET and look for known "invalid invite" phrases.
-    """
     try:
-        parsed = urlparse(join_url)
-        host = (parsed.netloc or "").lower()
         headers = {"User-Agent": USER_AGENT}
-
         with httpx.Client(
             timeout=timeout_seconds,
             follow_redirects=True,
             headers=headers,
             verify=False,
         ) as client:
-            resp = client.get(join_url)
+            resp = client.get(match.url)
             status_code = resp.status_code
             text_lc = (resp.text or "").lower()
 
-        if "slack.com" in host:
-            invalid_phrases = [
+        if status_code >= 400:
+            return False, f"{match.platform}_http_error", {"status_code": status_code}
+
+        invalid_by_platform = {
+            "slack": [
                 "invite invalid",
                 "this invite may be expired",
                 "might not have permission to join",
                 "does not appear to be a valid invite",
-            ]
-            if status_code >= 400:
-                return False, "slack_http_error", {"status_code": status_code}
-            if any(p in text_lc for p in invalid_phrases):
-                return (
-                    False,
-                    "slack_invite_invalid_phrase",
-                    {"status_code": status_code},
-                )
-            return True, "ok", {"status_code": status_code}
+                "workspace not found",
+            ],
+            "whatsapp": [
+                "invite link has been revoked",
+                "invite link is invalid",
+                "this invite link has expired",
+            ],
+            "telegram": [
+                "sorry, this channel doesn't seem to exist",
+                "this invite link is invalid",
+                "invite link is invalid or has expired",
+            ],
+            "discord": [
+                "invite invalid",
+                "unable to accept invite",
+                "expired invite",
+                "unknown invite",
+            ],
+        }
+        for phrase in invalid_by_platform.get(match.platform, []):
+            if phrase in text_lc:
+                return False, f"{match.platform}_invite_invalid_phrase", {"status_code": status_code}
 
-        if "wa.me" in host or "whatsapp.com" in host:
-            if status_code >= 400:
-                return False, "whatsapp_http_error", {"status_code": status_code}
-            invalid_phrases = ["404", "not found", "phone number"]
-            if any(p in text_lc for p in invalid_phrases):
-                return False, "whatsapp_invalid_phrase", {"status_code": status_code}
-            return True, "ok", {"status_code": status_code}
+        if not invite_host_ok(str(resp.url)):
+            # Redirected away from invite host → treat as dead.
+            return False, "redirected_off_invite_host", {"final_url": str(resp.url)[:200]}
 
-        return False, "unsupported_join_platform", {"host": host}
+        return True, "ok", {
+            "status_code": status_code,
+            "platform": match.platform,
+            "rule": match.rule,
+            "canonical_join_url": match.url,
+        }
     except Exception as exc:  # noqa: BLE001
-        return False, "join_url_validation_exception", {"error": str(exc)[:200]}
+        # Shape matched; network failure should not discard rare good invites.
+        return True, "ok_shape_only", {"error": str(exc)[:200], "canonical_join_url": match.url}
 
 
 def _start_run(session: Session) -> str:
@@ -341,22 +355,14 @@ def _stub_from_serp(
     scan_geo: str,
     niche: str | None = None,
 ) -> ExtractedCommunity:
-    """Persist SERP hit immediately (no fetch) for volume toward 10k rows."""
-    hit_url_lc = (hit.url or "").lower()
-    join_url_source_rule = None
-    if "slack.com/invite" in hit_url_lc or "slack.com/" in hit_url_lc:
-        join_url_source_rule = "slack_serp_invite_url"
-    if "wa.me/" in hit_url_lc or "whatsapp.com/" in hit_url_lc:
-        join_url_source_rule = "whatsapp_serp_invite_url"
-
-    is_invite = join_url_source_rule is not None
-
+    """Persist SERP hit only when the result URL itself is a direct invite."""
+    invite = classify_invite_url(hit.url or "")
     junk = bool(
         JUNK_HINTS.search(" ".join(filter(None, [hit.url, hit.title or "", hit.snippet or ""])))
     )
 
-    access = AccessStatus.JOIN if is_invite and not junk else AccessStatus.WATCH
-    join_url = hit.url if is_invite and not junk else None
+    access = AccessStatus.JOIN if invite and not junk else AccessStatus.WATCH
+    join_url = invite.url if invite and not junk else None
     return ExtractedCommunity(
         website=norm.website,
         canonical_key=norm.canonical_key,
@@ -378,11 +384,12 @@ def _stub_from_serp(
             **(
                 {
                     "join_url_source": {
-                        "rule": join_url_source_rule,
+                        "rule": invite.rule,
+                        "platform": invite.platform,
                         "hit_url": hit.url,
                     }
                 }
-                if join_url_source_rule
+                if invite
                 else {}
             ),
         },
@@ -401,14 +408,23 @@ def apply_serp_stubs(
     for hit, norm in candidates:
         item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
 
-        # Only store SERP stubs that have a direct invite URL (slack/whatsapp hit).
-        # Stubs without join_url will be fetched later; skip writing them now.
         if not item.join_url:
-            metrics.skipped_junk += 1
             continue
         if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
             metrics.skipped_junk += 1
             continue
+
+        ok, reason, details = _validate_join_url(item.join_url)
+        item.raw_signals = {
+            **item.raw_signals,
+            "join_url_validation": {"ok": ok, "reason": reason, "details": details},
+        }
+        if not ok:
+            metrics.skipped_junk += 1
+            continue
+        canonical = (details or {}).get("canonical_join_url")
+        if canonical:
+            item.join_url = canonical
 
         _, created, changed = upsert_community(session, item)
         if created:
@@ -427,8 +443,27 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        # Skip rows where HTML fetch didn't yield a join_url (Slack/WhatsApp link).
         if not outcome.item.join_url:
+            metrics.skipped_junk += 1
+            continue
+
+        invite = classify_invite_url(outcome.item.join_url)
+        if not invite:
+            metrics.skipped_junk += 1
+            continue
+        outcome.item.join_url = invite.url
+
+        ok, reason, details = _validate_join_url(outcome.item.join_url)
+        outcome.item.raw_signals = {
+            **outcome.item.raw_signals,
+            "join_url_validation": {"ok": ok, "reason": reason, "details": details},
+            "join_url_source": {
+                **(outcome.item.raw_signals.get("join_url_source") or {}),
+                "platform": invite.platform,
+                "rule": invite.rule,
+            },
+        }
+        if not ok:
             metrics.skipped_junk += 1
             continue
 

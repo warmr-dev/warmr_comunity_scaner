@@ -15,8 +15,8 @@ class SearxngProvider(DiscoveryProvider):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.language = language
-        # Bing primary; Yahoo as secondary for more SERP diversity from cloud IPs.
-        self.engines = "bing,yahoo"
+        # Bing only — Yahoo disconnects constantly from Railway IPs.
+        self.engines = "bing"
         self._cooldown_until = 0.0
 
     def search(self, query: str, count: int = 10) -> list[DiscoveryHit]:
