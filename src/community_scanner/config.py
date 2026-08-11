@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     http_timeout_seconds: float = 12.0
     crawl_download_delay_seconds: float = 0.0
+    directory_max_channels_per_site: int = Field(default=40, ge=5, le=200)
     fetch_concurrency: int = Field(default=50, ge=1, le=500)
     fetch_batch_size: int = Field(default=500, ge=1, le=10_000)
     worker_max_items: int = Field(default=100_000, ge=1, le=5_000_000)

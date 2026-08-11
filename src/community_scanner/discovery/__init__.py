@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from community_scanner.config import Settings
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams, generate_queries
 from community_scanner.discovery.brave import BraveSearchProvider
+from community_scanner.discovery.directory_crawler import DirectoryCrawlerProvider
 from community_scanner.discovery.searxng import SearxngProvider
 from community_scanner.discovery.seeds import SeedsProvider
 from community_scanner.models import DiscoveryHit
@@ -20,6 +21,14 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
                 BraveSearchProvider(
                     api_key=settings.brave_search_api_key,
                     timeout=settings.http_timeout_seconds,
+                )
+            )
+        elif name in ("directory", "directories"):
+            providers.append(
+                DirectoryCrawlerProvider(
+                    timeout=settings.http_timeout_seconds,
+                    delay=max(0.2, settings.crawl_download_delay_seconds or 0.4),
+                    max_channels_per_site=settings.directory_max_channels_per_site,
                 )
             )
         elif name == "searxng":
@@ -41,6 +50,16 @@ def _search_safe(provider: DiscoveryProvider, query: str, per_query: int) -> lis
         return []
 
 
+def _crawl_safe(provider: DiscoveryProvider, params: QueryParams, count: int) -> list[DiscoveryHit]:
+    crawl = getattr(provider, "crawl", None)
+    if not callable(crawl):
+        return []
+    try:
+        return crawl(params, count=count)
+    except Exception:
+        return []
+
+
 def run_discovery(
     settings: Settings,
     params: QueryParams,
@@ -52,22 +71,38 @@ def run_discovery(
     providers = build_providers(settings)
     if not providers:
         raise RuntimeError(
-            "No discovery providers configured. Set DISCOVERY_PROVIDERS=searxng and SEARXNG_BASE_URL."
+            "No discovery providers configured. Set DISCOVERY_PROVIDERS=directory or searxng."
         )
 
-    queries = generate_queries(params, limit=query_limit)
     hits: list[DiscoveryHit] = []
     seen_urls: set[str] = set()
+    budget = per_query * query_limit
 
-    tasks: list[tuple[DiscoveryProvider, str]] = [
-        (provider, query) for query in queries for provider in providers
-    ]
+    crawl_providers = [p for p in providers if callable(getattr(p, "crawl", None))]
+    search_providers = [p for p in providers if p not in crawl_providers]
 
-    workers = min(settings.discovery_concurrency, len(tasks))
-    # Fast volume mode: short gap between queries (override with CRAWL_DOWNLOAD_DELAY_SECONDS).
     delay = max(0.0, settings.crawl_download_delay_seconds)
     if "searxng" in settings.discovery_provider_list and delay <= 0:
         delay = 0.6
+
+    for provider in crawl_providers:
+        for hit in _crawl_safe(provider, params, budget):
+            if hit.url in seen_urls:
+                continue
+            seen_urls.add(hit.url)
+            hits.append(hit)
+
+    if not search_providers:
+        return hits
+
+    queries = generate_queries(params, limit=query_limit)
+    tasks: list[tuple[DiscoveryProvider, str]] = [
+        (provider, query) for query in queries for provider in search_providers
+    ]
+    if not tasks:
+        return hits
+
+    workers = min(settings.discovery_concurrency, len(tasks))
 
     # Sequential when concurrency=1 (recommended): one query at a time with pause.
     if workers <= 1:

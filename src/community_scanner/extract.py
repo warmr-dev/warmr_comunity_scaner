@@ -6,6 +6,7 @@ import re
 from typing import Any
 from bs4 import BeautifulSoup
 
+from community_scanner.content_filter import is_adult_community
 from community_scanner.invites import find_all_invites_in_text, resolve_href_invite
 from community_scanner.models import (
     AccessStatus,
@@ -44,10 +45,9 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
 
     access = AccessStatus.WATCH
     body_lc = body.lower()
-    # Exclude adult/18+ content early.
-    if re.search(r"(18\+|adult|porn|nsfw|explicit|onlyfans|hentai|lewd)", body_lc, flags=re.I):
+    if is_adult_community(name=name, html=body, url=normalized.website, platform_id=normalized.platform_id):
         access = AccessStatus.REJECT
-    if APPLY_PATTERNS.search(body):
+    elif APPLY_PATTERNS.search(body):
         access = AccessStatus.APPLY
     elif JOIN_PATTERNS.search(body):
         access = AccessStatus.JOIN

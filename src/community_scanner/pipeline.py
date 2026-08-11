@@ -9,6 +9,7 @@ import httpx
 from sqlalchemy.orm import Session
 from community_scanner.classify import classify
 from community_scanner.config import Settings
+from community_scanner.content_filter import is_adult_community
 from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
@@ -19,6 +20,7 @@ from community_scanner.invites import (
     find_all_invites_in_text,
     find_invite_in_text,
     invite_from_platform_page,
+    parse_member_count,
 )
 from community_scanner.models import (
     AccessStatus,
@@ -182,6 +184,13 @@ def _item_from_invite(
     norm = normalize_url(invite.url)
     if norm.is_blocked:
         return None
+    if is_adult_community(
+        name=name,
+        url=invite.url,
+        platform_id=norm.platform_id,
+        snippet=str(raw_signals.get("snippet") or raw_signals.get("directory_size_text") or ""),
+    ):
+        return None
     return ExtractedCommunity(
         website=norm.website,
         canonical_key=norm.canonical_key,
@@ -216,6 +225,15 @@ def _upsert_invite_item(
     if not item.join_url:
         metrics.skipped_junk += 1
         return
+    if is_adult_community(
+        name=item.name,
+        url=item.join_url,
+        platform_id=item.platform_id,
+        snippet=str(item.raw_signals),
+    ):
+        metrics.skipped_junk += 1
+        item.raw_signals = {**item.raw_signals, "reject_reason": "adult_content"}
+        return
     invite = classify_invite_url(item.join_url)
     if not invite:
         metrics.skipped_junk += 1
@@ -244,6 +262,19 @@ def _upsert_invite_item(
     if meta.get("size_members") is not None:
         item.size_members = int(meta["size_members"])
         item.size_text = meta.get("size_text") or item.size_text
+
+    if item.size_members is None:
+        for blob in (
+            item.raw_signals.get("directory_size_text"),
+            item.raw_signals.get("snippet"),
+        ):
+            if not blob:
+                continue
+            parsed, parsed_text = parse_member_count(str(blob))
+            if parsed is not None:
+                item.size_members = parsed
+                item.size_text = parsed_text or item.size_text
+                break
 
     if item.size_members is None or item.size_members < MIN_MEMBERS_FOR_UPSERT:
         metrics.skipped_junk += 1
@@ -662,6 +693,11 @@ def apply_serp_stubs(
                     "snippet": hit.snippet,
                     "provider": hit.provider,
                     "hit_url": hit.url,
+                    **(
+                        {"directory_size_text": hit.snippet}
+                        if hit.provider == "directory" and hit.snippet
+                        else {}
+                    ),
                 },
             )
             if item is None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from community_scanner.content_filter import is_adult_community
 from community_scanner.etalons import match_etalon
 from community_scanner.models import AccessStatus, ExtractedCommunity, Platform, ValueTier
 
@@ -17,6 +18,19 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
     if item.access_status == AccessStatus.REJECT:
         item.value_score = 0
         item.value_tier = ValueTier.JUNK
+        return item
+
+    if is_adult_community(
+        name=item.name,
+        url=item.website,
+        platform_id=item.platform_id,
+        snippet=str(item.raw_signals),
+        html=item.join_url,
+    ):
+        item.access_status = AccessStatus.REJECT
+        item.value_tier = ValueTier.JUNK
+        item.value_score = 0
+        item.raw_signals = {**signals, "reject_reason": "adult_content"}
         return item
 
     # Require meaningful audience for invite links.

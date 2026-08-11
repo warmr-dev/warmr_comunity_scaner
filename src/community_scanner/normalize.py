@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse, urlunparse
 
+from community_scanner.content_filter import ADULT_CONTENT_RE, is_adult_content
 from community_scanner.models import NormalizedUrl, Platform
 
 # Volume mode: only skip pure search engines / video hosts (not useful as communities).
@@ -32,14 +33,14 @@ COMMUNITY_HINTS = re.compile(
     re.I,
 )
 
-# Hard negative signals in title/snippet/url
+# Hard negative signals in title/snippet/url (includes 18+ / NSFW via content_filter).
 JUNK_HINTS = re.compile(
     r"(definition|meaning|dictionary|thesaurus|payed\s+vs|paid\s+vs|"
     r"lorem\s+ipsum|placeholder\s+query|crossword|chemical\s+equation|"
     r"file\s+taxes|tax\s+software|best\s+restaurants|hotel|best\s+buy|"
     r"what\s+is\s+accounting|accounting\s+basics|cpa\s+exam|"
-    # NSFW / adult content (exclude 18+)
-    r"18\+|adult|porn|nsfw|explicit|xxx|onlyfans|hentai|lewd)",
+    + ADULT_CONTENT_RE.pattern
+    + r")",
     re.I,
 )
 
@@ -154,6 +155,8 @@ def _is_blocked_host(domain: str) -> bool:
 def looks_like_community(url: str, title: str | None = None, snippet: str | None = None) -> bool:
     """Cheap pre-fetch filter: keep community-like SERP hits only."""
     blob = " ".join(filter(None, [url, title or "", snippet or ""]))
+    if is_adult_content(blob):
+        return False
     if JUNK_HINTS.search(blob):
         return False
     if COMMUNITY_HINTS.search(blob):
