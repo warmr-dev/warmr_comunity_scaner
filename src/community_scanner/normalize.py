@@ -54,6 +54,8 @@ PLATFORM_HOSTS: dict[str, Platform] = {
     "slack.com": Platform.SLACK,
     "t.me": Platform.TELEGRAM,
     "telegram.me": Platform.TELEGRAM,
+    "chat.whatsapp.com": Platform.WHATSAPP,
+    "whatsapp.com": Platform.WHATSAPP,
     "mightynetworks.com": Platform.MIGHTY,
     "facebook.com": Platform.FACEBOOK,
     "linkedin.com": Platform.LINKEDIN,
@@ -107,6 +109,14 @@ def extract_platform_id(platform: Platform, domain: str, path: str) -> str | Non
             return parts[0].lstrip("+")
         if parts and parts[0] == "joinchat" and len(parts) > 1:
             return parts[1]
+        return None
+
+    if platform == Platform.WHATSAPP:
+        # chat.whatsapp.com/<code> or whatsapp.com/channel/<code>
+        if parts and parts[0] == "channel" and len(parts) > 1:
+            return parts[1].split("?")[0]
+        if parts:
+            return parts[0].split("?")[0]
         return None
 
     if platform == Platform.SLACK:

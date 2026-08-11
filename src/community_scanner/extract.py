@@ -6,7 +6,7 @@ import re
 from typing import Any
 from bs4 import BeautifulSoup
 
-from community_scanner.invites import find_invite_in_text, resolve_href_invite
+from community_scanner.invites import find_all_invites_in_text, resolve_href_invite
 from community_scanner.models import (
     AccessStatus,
     ExtractedCommunity,
@@ -74,14 +74,32 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         except ValueError:
             size_members = None
 
-    # Only accept direct chat/group invite URLs (Slack / WhatsApp / Telegram / Discord).
+    # Collect ALL Telegram / WhatsApp / Slack invites on the page (directories yield many).
     join_url = None
     join_url_meta: dict[str, str | None] = {}
+    all_invites: list[dict[str, str]] = []
+    seen_invites: set[str] = set()
+
     for a in soup.find_all("a", href=True):
         href = str(a.get("href") or "")
         anchor_text = a.get_text(" ", strip=True) or None
         match = resolve_href_invite(href, base_domain=normalized.canonical_domain)
-        if match:
+        if not match:
+            continue
+        key = match.url.lower().rstrip("/")
+        if key in seen_invites:
+            continue
+        seen_invites.add(key)
+        all_invites.append(
+            {
+                "url": match.url,
+                "platform": match.platform,
+                "rule": match.rule,
+                "href": href,
+                "anchor_text": anchor_text or "",
+            }
+        )
+        if join_url is None:
             join_url = match.url
             join_url_meta = {
                 "rule": match.rule,
@@ -89,12 +107,23 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
                 "href": href,
                 "anchor_text": anchor_text,
             }
-            break
 
-    if not join_url:
-        # Invite links often appear as plain text, not <a href>.
-        match = find_invite_in_text(html) or find_invite_in_text(body)
-        if match:
+    # Plaintext invites (often in directories / blog lists).
+    for match in find_all_invites_in_text(html) + find_all_invites_in_text(body):
+        key = match.url.lower().rstrip("/")
+        if key in seen_invites:
+            continue
+        seen_invites.add(key)
+        all_invites.append(
+            {
+                "url": match.url,
+                "platform": match.platform,
+                "rule": f"{match.rule}_plaintext",
+                "href": match.url,
+                "anchor_text": "",
+            }
+        )
+        if join_url is None:
             join_url = match.url
             join_url_meta = {
                 "rule": f"{match.rule}_plaintext",
@@ -150,6 +179,7 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         raw_signals={
             "heuristic_confidence": confidence,
             **({"join_url_source": join_url_meta} if join_url_meta else {}),
+            **({"all_invites": all_invites[:200]} if all_invites else {}),
         },
         content_hash=content_hash,
         extraction_confidence=min(confidence, 1.0),

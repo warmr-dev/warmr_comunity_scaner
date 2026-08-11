@@ -14,6 +14,7 @@ from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
 from community_scanner.invites import (
     classify_invite_url,
+    find_all_invites_in_text,
     find_invite_in_text,
     invite_from_platform_page,
 )
@@ -63,6 +64,13 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
         details["status_code"] = status_code
 
         invalid_by_platform = {
+            "slack": [
+                "invite invalid",
+                "this invite may be expired",
+                "might not have permission to join",
+                "does not appear to be a valid invite",
+                "workspace not found",
+            ],
             "whatsapp": [
                 "invite link has been revoked",
                 "invite link is invalid",
@@ -104,6 +112,110 @@ def _invite_from_hit(hit: DiscoveryHit, norm: NormalizedUrl | None = None):
         if invite:
             return invite, "platform_page"
     return None, None
+
+
+DIRECTORY_HOST_HINTS = (
+    "tgstat.",
+    "telemetr.",
+    "combot.org",
+    "tlgrm.ru",
+    "t.me",
+    "telegram.me",
+    "chat.whatsapp.com",
+    "whatsapp.com",
+    "join.slack.com",
+    "slack.com",
+)
+
+
+def _invite_priority(hit: DiscoveryHit, norm: NormalizedUrl) -> int:
+    """Higher = fetch first. Prefer invite URLs and directory hosts."""
+    score = 0
+    url_lc = (hit.url or "").lower()
+    blob = " ".join(filter(None, [url_lc, hit.title or "", hit.snippet or ""])).lower()
+    if classify_invite_url(hit.url or ""):
+        score += 100
+    if any(h in url_lc for h in DIRECTORY_HOST_HINTS):
+        score += 50
+    if any(x in blob for x in ("t.me/", "chat.whatsapp.com", "join.slack.com", "shared_invite")):
+        score += 30
+    if any(x in blob for x in ("telegram", "whatsapp", "slack")):
+        score += 10
+    return score
+
+
+def _item_from_invite(
+    invite_url: str,
+    *,
+    scan_geo: str,
+    niche: str | None,
+    name: str | None,
+    source_queries: list[str],
+    raw_signals: dict,
+) -> ExtractedCommunity | None:
+    invite = classify_invite_url(invite_url)
+    if not invite:
+        return None
+    norm = normalize_url(invite.url)
+    if norm.is_blocked:
+        return None
+    return ExtractedCommunity(
+        website=norm.website,
+        canonical_key=norm.canonical_key,
+        canonical_domain=norm.canonical_domain,
+        platform=norm.platform,
+        platform_id=norm.platform_id,
+        name=name or invite.url,
+        niche=niche,
+        geo=scan_geo,
+        join_url=invite.url,
+        access_status=AccessStatus.JOIN,
+        value_tier=ValueTier.LOW,
+        value_score=30,
+        source_queries=source_queries,
+        raw_signals={
+            **raw_signals,
+            "join_url_source": {
+                "rule": invite.rule,
+                "platform": invite.platform,
+                "url": invite.url,
+            },
+        },
+        needs_llm=False,
+    )
+
+
+def _upsert_invite_item(
+    session: Session,
+    item: ExtractedCommunity,
+    metrics: PipelineMetrics,
+) -> None:
+    if not item.join_url:
+        metrics.skipped_junk += 1
+        return
+    invite = classify_invite_url(item.join_url)
+    if not invite:
+        metrics.skipped_junk += 1
+        return
+    item.join_url = invite.url
+    ok, reason, details = _validate_join_url(item.join_url)
+    item.raw_signals = {
+        **item.raw_signals,
+        "join_url_validation": {"ok": ok, "reason": reason, "details": details},
+    }
+    if not ok:
+        metrics.skipped_junk += 1
+        return
+    if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
+        metrics.skipped_junk += 1
+        return
+    _, created, changed = upsert_community(session, item)
+    if created:
+        metrics.upserted_new += 1
+    elif changed:
+        metrics.upserted_changed += 1
+    else:
+        metrics.upserted_unchanged += 1
 
 
 def _start_run(session: Session) -> str:
@@ -470,33 +582,33 @@ def apply_serp_stubs(
     niche: str | None = None,
 ) -> None:
     for hit, norm in candidates:
-        item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
+        # Harvest every invite found in URL + title + snippet (directories/lists).
+        blob = " ".join(filter(None, [hit.url or "", hit.title or "", hit.snippet or ""]))
+        invites = find_all_invites_in_text(blob)
+        direct = classify_invite_url(hit.url or "")
+        if direct and all(i.url != direct.url for i in invites):
+            invites = [direct, *invites]
 
-        if not item.join_url:
-            continue
-        if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
-            metrics.skipped_junk += 1
+        if not invites:
             continue
 
-        ok, reason, details = _validate_join_url(item.join_url)
-        item.raw_signals = {
-            **item.raw_signals,
-            "join_url_validation": {"ok": ok, "reason": reason, "details": details},
-        }
-        if not ok:
-            metrics.skipped_junk += 1
-            continue
-        canonical = (details or {}).get("canonical_join_url")
-        if canonical:
-            item.join_url = canonical
-
-        _, created, changed = upsert_community(session, item)
-        if created:
-            metrics.upserted_new += 1
-        elif changed:
-            metrics.upserted_changed += 1
-        else:
-            metrics.upserted_unchanged += 1
+        for invite in invites:
+            item = _item_from_invite(
+                invite.url,
+                scan_geo=scan_geo,
+                niche=niche,
+                name=hit.title,
+                source_queries=[hit.query] if hit.query else [],
+                raw_signals={
+                    "serp_stub": True,
+                    "snippet": hit.snippet,
+                    "provider": hit.provider,
+                    "hit_url": hit.url,
+                },
+            )
+            if item is None:
+                continue
+            _upsert_invite_item(session, item, metrics)
 
 
 def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: PipelineMetrics) -> None:
@@ -507,44 +619,45 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        if not outcome.item.join_url:
+        item = outcome.item
+        invite_urls: list[str] = []
+        for entry in item.raw_signals.get("all_invites") or []:
+            if isinstance(entry, dict) and entry.get("url"):
+                invite_urls.append(str(entry["url"]))
+        if item.join_url:
+            invite_urls.insert(0, item.join_url)
+
+        # Deduplicate while preserving order.
+        seen: set[str] = set()
+        unique_urls: list[str] = []
+        for url in invite_urls:
+            key = url.lower().rstrip("/")
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_urls.append(url)
+
+        if not unique_urls:
             metrics.skipped_junk += 1
             continue
 
-        invite = classify_invite_url(outcome.item.join_url)
-        if not invite:
-            metrics.skipped_junk += 1
-            continue
-        outcome.item.join_url = invite.url
-
-        ok, reason, details = _validate_join_url(outcome.item.join_url)
-        outcome.item.raw_signals = {
-            **outcome.item.raw_signals,
-            "join_url_validation": {"ok": ok, "reason": reason, "details": details},
-            "join_url_source": {
-                **(outcome.item.raw_signals.get("join_url_source") or {}),
-                "platform": invite.platform,
-                "rule": invite.rule,
-            },
-        }
-        if not ok:
-            metrics.skipped_junk += 1
-            continue
-
-        if (
-            outcome.item.access_status == AccessStatus.REJECT
-            or outcome.item.value_tier == ValueTier.JUNK
-        ):
-            metrics.skipped_junk += 1
-            continue
-
-        _, created, changed = upsert_community(session, outcome.item)
-        if created:
-            metrics.upserted_new += 1
-        elif changed:
-            metrics.upserted_changed += 1
-        else:
-            metrics.upserted_unchanged += 1
+        for url in unique_urls:
+            expanded = _item_from_invite(
+                url,
+                scan_geo=item.geo or "USA",
+                niche=item.niche,
+                name=item.name,
+                source_queries=list(item.source_queries or []),
+                raw_signals={
+                    "from_page": item.website,
+                    "source_canonical_key": item.canonical_key,
+                    **{k: v for k, v in (item.raw_signals or {}).items() if k != "all_invites"},
+                },
+            )
+            if expanded is None:
+                metrics.skipped_junk += 1
+                continue
+            _upsert_invite_item(session, expanded, metrics)
 
 
 def discover_candidates(
@@ -575,7 +688,12 @@ def discover_candidates(
     for hit, norm in candidates:
         unique.setdefault(norm.canonical_key, (hit, norm))
 
-    return hits, key_by_url, list(unique.values()), metrics
+    ranked = sorted(
+        unique.values(),
+        key=lambda pair: _invite_priority(pair[0], pair[1]),
+        reverse=True,
+    )
+    return hits, key_by_url, ranked, metrics
 
 
 def run_discovery_only(

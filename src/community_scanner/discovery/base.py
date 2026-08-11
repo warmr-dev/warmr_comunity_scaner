@@ -15,38 +15,47 @@ class QueryParams:
     community_type: str | None = None
 
 
-# Telegram + WhatsApp only — maximize invite/channel SERP surface.
+# Directories + invite operators for Telegram / WhatsApp / Slack.
+# Goal: land on list pages that contain many invite URLs, then extract all of them.
 USA_TEMPLATES = [
-    # Telegram directories / operators
+    # Telegram directories
+    "site:tgstat.com {niche}",
+    "site:tgstat.ru {niche}",
+    "site:telemetr.io {niche}",
+    "site:combot.org {niche}",
+    "site:tlgrm.ru {niche}",
     "site:t.me {niche}",
-    "site:telegram.me {niche}",
     "inurl:t.me {niche}",
     "inurl:t.me/+ {niche}",
-    "inurl:joinchat {niche}",
-    '"{niche}" "t.me/"',
+    '"{niche}" "t.me/" telegram',
     '"{niche}" "t.me/+"',
-    '"{niche}" telegram channel',
-    '"{niche}" telegram group',
-    '"{niche}" telegram community',
-    "{niche} telegram channel {geo}",
-    "{niche} telegram group invite {geo}",
-    "{niche} telegram chat {geo}",
-    "{audience} {niche} telegram",
+    "{niche} telegram channel list",
+    "{niche} telegram group invite",
+    "{niche} telegram channels {geo}",
     "best {niche} telegram channels",
-    "{niche} telegram list OR directory",
-    # WhatsApp
+    "{audience} {niche} telegram group",
+    # WhatsApp directories / lists
     "site:chat.whatsapp.com {niche}",
     "inurl:chat.whatsapp.com {niche}",
     "inurl:whatsapp.com/channel {niche}",
-    '"{niche}" chat.whatsapp.com/',
-    '"{niche}" whatsapp group invite',
-    '"{niche}" whatsapp community',
-    "{niche} whatsapp group {geo}",
-    "{niche} whatsapp invite link {geo}",
-    "{niche} whatsapp channel {geo}",
-    "{audience} {niche} whatsapp group",
-    "join {niche} whatsapp group",
+    '"{niche}" chat.whatsapp.com',
+    '"{niche}" "whatsapp group invite"',
+    "{niche} whatsapp group link",
+    "{niche} whatsapp group invite {geo}",
     "{niche} whatsapp community invite",
+    "join {niche} whatsapp group",
+    "{audience} {niche} whatsapp group",
+    "best {niche} whatsapp groups",
+    # Slack
+    "site:join.slack.com {niche}",
+    "inurl:join.slack.com {niche}",
+    "inurl:shared_invite {niche}",
+    '"{niche}" join.slack.com',
+    '"{niche}" slack.com/shared_invite',
+    "{niche} slack invite {geo}",
+    "{niche} slack community invite",
+    "{niche} slack workspace {geo}",
+    "{audience} {niche} slack invite",
 ]
 
 

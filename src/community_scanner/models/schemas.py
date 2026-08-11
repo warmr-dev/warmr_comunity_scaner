@@ -31,6 +31,7 @@ class Platform(str, Enum):
     CIRCLE = "circle"
     SLACK = "slack"
     TELEGRAM = "telegram"
+    WHATSAPP = "whatsapp"
     MIGHTY = "mighty"
     FACEBOOK = "facebook"
     LINKEDIN = "linkedin"
