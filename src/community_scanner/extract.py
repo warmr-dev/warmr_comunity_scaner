@@ -26,7 +26,7 @@ PRICE_PATTERNS = re.compile(
     re.I,
 )
 MEMBERS_PATTERNS = re.compile(
-    r"([\d,.]+)\s*(members|member|people|subscribers|users)",
+    r"([\d\s,.]+)\s*(members|member|people|subscribers|subscriber|users|online)",
     re.I,
 )
 

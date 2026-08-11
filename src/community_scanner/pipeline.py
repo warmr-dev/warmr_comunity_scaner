@@ -13,7 +13,9 @@ from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
 from community_scanner.invites import (
+    MIN_MEMBERS_FOR_UPSERT,
     classify_invite_url,
+    enrich_invite_page,
     find_all_invites_in_text,
     find_invite_in_text,
     invite_from_platform_page,
@@ -198,6 +200,40 @@ def _upsert_invite_item(
         metrics.skipped_junk += 1
         return
     item.join_url = invite.url
+
+    # Enrich from invite landing page (Telegram shows subscriber count publicly).
+    meta = enrich_invite_page(item.join_url)
+    item.raw_signals = {
+        **item.raw_signals,
+        "invite_page": {
+            "ok": meta.get("ok"),
+            "status_code": meta.get("status_code"),
+            "size_members": meta.get("size_members"),
+            "size_text": meta.get("size_text"),
+            "error": meta.get("error"),
+        },
+    }
+    if meta.get("name") and (
+        not item.name
+        or item.name.startswith("http")
+        or item.name == item.canonical_domain
+        or "list" in (item.name or "").lower()
+    ):
+        item.name = meta["name"]
+    if meta.get("size_members") is not None:
+        item.size_members = int(meta["size_members"])
+        item.size_text = meta.get("size_text") or item.size_text
+
+    # Quality gate: require real audience size.
+    if item.size_members is None or item.size_members < MIN_MEMBERS_FOR_UPSERT:
+        metrics.skipped_junk += 1
+        item.raw_signals = {
+            **item.raw_signals,
+            "reject_reason": "too_small_or_unknown_size",
+            "min_members": MIN_MEMBERS_FOR_UPSERT,
+        }
+        return
+
     ok, reason, details = _validate_join_url(item.join_url)
     item.raw_signals = {
         **item.raw_signals,
@@ -206,6 +242,8 @@ def _upsert_invite_item(
     if not ok:
         metrics.skipped_junk += 1
         return
+
+    item = classify(item)
     if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
         metrics.skipped_junk += 1
         return

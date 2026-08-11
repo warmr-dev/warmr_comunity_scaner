@@ -19,13 +19,22 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
         item.value_tier = ValueTier.JUNK
         return item
 
-    # Prefer communities with a meaningful audience when we have a signal.
-    # If we already found a direct invite/join URL, keep it even if members_count is missing.
-    if not item.join_url and item.size_members is not None and item.size_members < 50:
+    # Prefer communities with a meaningful audience.
+    # Invite links without a proven size are rejected in pipeline upsert gate;
+    # here we still reject known-small communities.
+    if item.size_members is not None and item.size_members < 100:
         item.access_status = AccessStatus.REJECT
         item.value_tier = ValueTier.JUNK
         item.value_score = 0
         item.raw_signals = {**signals, "reject_reason": "too_small"}
+        return item
+
+    if item.join_url and item.size_members is None:
+        # Unknown size after enrichment → not valuable enough yet.
+        item.access_status = AccessStatus.REJECT
+        item.value_tier = ValueTier.JUNK
+        item.value_score = 0
+        item.raw_signals = {**signals, "reject_reason": "unknown_size"}
         return item
 
     # Reject dictionary / tax-software / explainer SERP noise after fetch
@@ -86,11 +95,24 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
             signals["too_small"] = True
     if item.is_professional:
         score += 15
-    if item.platform in {Platform.SKOOL, Platform.CIRCLE, Platform.DISCORD, Platform.SLACK}:
+    if item.platform in {
+        Platform.SKOOL,
+        Platform.CIRCLE,
+        Platform.DISCORD,
+        Platform.SLACK,
+        Platform.TELEGRAM,
+        Platform.WHATSAPP,
+    }:
         score += 12
         if item.platform == Platform.SLACK:
             score += 8
             signals["slack_bonus"] = True
+        if item.platform == Platform.TELEGRAM and item.size_members and item.size_members >= 1000:
+            score += 8
+            signals["telegram_size_bonus"] = True
+        if item.platform == Platform.WHATSAPP:
+            score += 4
+            signals["whatsapp_bonus"] = True
     if item.access_status in {AccessStatus.JOIN, AccessStatus.APPLY}:
         score += 10
     if item.join_url:

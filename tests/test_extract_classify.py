@@ -77,3 +77,52 @@ def test_whatsapp_canonical_key_unique():
     b = normalize_url("https://chat.whatsapp.com/BBBB")
     assert a.platform.value == "whatsapp"
     assert a.canonical_key != b.canonical_key
+
+
+def test_parse_member_count_telegram():
+    from community_scanner.invites import MIN_MEMBERS_FOR_UPSERT, parse_member_count
+
+    n, text = parse_member_count("Python Devs — 12 450 subscribers")
+    assert n == 12450
+    assert text is not None
+    assert MIN_MEMBERS_FOR_UPSERT == 100
+    tiny, _ = parse_member_count("3 members")
+    assert tiny == 3
+
+
+def test_classify_rejects_small_invite():
+    from community_scanner.models import ExtractedCommunity, Platform
+
+    item = ExtractedCommunity(
+        website="https://t.me/tiny",
+        canonical_key="telegram:tiny",
+        canonical_domain="t.me",
+        platform=Platform.TELEGRAM,
+        platform_id="tiny",
+        name="Tiny",
+        join_url="https://t.me/tiny",
+        size_members=12,
+        access_status=AccessStatus.JOIN,
+    )
+    out = classify(item)
+    assert out.access_status == AccessStatus.REJECT
+    assert out.value_tier == ValueTier.JUNK
+
+
+def test_classify_rejects_unknown_size_invite():
+    from community_scanner.models import ExtractedCommunity, Platform
+
+    item = ExtractedCommunity(
+        website="https://t.me/mystery",
+        canonical_key="telegram:mystery",
+        canonical_domain="t.me",
+        platform=Platform.TELEGRAM,
+        platform_id="mystery",
+        name="Mystery",
+        join_url="https://t.me/mystery",
+        size_members=None,
+        access_status=AccessStatus.JOIN,
+    )
+    out = classify(item)
+    assert out.access_status == AccessStatus.REJECT
+    assert out.raw_signals.get("reject_reason") == "unknown_size"

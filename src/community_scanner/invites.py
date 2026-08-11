@@ -189,6 +189,83 @@ def invite_from_platform_page(website: str, platform: str | None, platform_id: s
     return None
 
 
+MEMBERS_PATTERNS = re.compile(
+    r"([\d,.]+)\s*(members|member|people|subscribers|users|subscribers?)",
+    re.I,
+)
+# Telegram preview pages: "1 234 subscribers" / "12,345 members"
+TG_SIZE_PATTERNS = re.compile(
+    r"([\d\s,.]+)\s*(subscribers?|members?|online)",
+    re.I,
+)
+MIN_MEMBERS_FOR_UPSERT = 100
+
+
+def parse_member_count(text: str) -> tuple[int | None, str | None]:
+    """Best-effort audience size from invite / channel preview HTML."""
+    if not text:
+        return None, None
+    for pattern in (TG_SIZE_PATTERNS, MEMBERS_PATTERNS):
+        for m in pattern.finditer(text):
+            raw = m.group(1)
+            digits = re.sub(r"[^\d]", "", raw)
+            if not digits:
+                continue
+            try:
+                n = int(digits)
+            except ValueError:
+                continue
+            # Ignore years / tiny noise / absurd crawler junk
+            if n < 2 or n > 50_000_000:
+                continue
+            return n, m.group(0).strip()
+    return None, None
+
+
+def enrich_invite_page(join_url: str, *, timeout_seconds: float = 8.0) -> dict:
+    """Fetch invite landing page and pull title + subscriber/member count."""
+    import httpx
+
+    out: dict = {"ok": False, "url": join_url}
+    try:
+        headers = {
+            "User-Agent": "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
+        }
+        with httpx.Client(
+            timeout=timeout_seconds,
+            follow_redirects=True,
+            headers=headers,
+            verify=False,
+        ) as client:
+            resp = client.get(join_url)
+            out["status_code"] = resp.status_code
+            if resp.status_code >= 400:
+                return out
+            html = resp.text or ""
+        out["ok"] = True
+        # Prefer Telegram preview title block, then <title>
+        name = None
+        m = re.search(
+            r'class="tgme_page_title[^"]*"[^>]*>\s*<span[^>]*>([^<]+)',
+            html,
+            flags=re.I,
+        )
+        if m:
+            name = m.group(1).strip()
+        if not name:
+            m = re.search(r"<title>([^<]+)</title>", html, flags=re.I)
+            if m:
+                name = re.sub(r"\s*[|\-–].*$", "", m.group(1)).strip() or None
+        size, size_text = parse_member_count(html)
+        out["name"] = name
+        out["size_members"] = size
+        out["size_text"] = size_text
+        return out
+    except Exception as exc:  # noqa: BLE001
+        out["error"] = str(exc)[:200]
+        return out
+
+
 def invite_host_ok(url: str) -> bool:
     host = (urlparse(url).netloc or "").lower()
     return any(
