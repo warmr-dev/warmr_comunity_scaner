@@ -401,20 +401,11 @@ def apply_serp_stubs(
     for hit, norm in candidates:
         item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
 
-        # Validate invite links only when present; a missing join_url is still upserted.
-        if item.join_url and item.access_status != AccessStatus.REJECT:
-            ok, reason, details = _validate_join_url(item.join_url)
-            item.raw_signals = {
-                **item.raw_signals,
-                "join_url_validation": {
-                    "ok": ok,
-                    "reason": reason,
-                    "details": details,
-                },
-            }
-            if not ok:
-                item.join_url = None  # clear bad link but keep the row
-                item.access_status = AccessStatus.WATCH
+        # Only store SERP stubs that have a direct invite URL (slack/whatsapp hit).
+        # Stubs without join_url will be fetched later; skip writing them now.
+        if not item.join_url:
+            metrics.skipped_junk += 1
+            continue
         if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
             metrics.skipped_junk += 1
             continue
@@ -436,20 +427,10 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        # Validate invite links only when present; a missing join_url keeps the row.
-        if outcome.item.join_url and outcome.item.access_status != AccessStatus.REJECT:
-            ok, reason, details = _validate_join_url(outcome.item.join_url)
-            outcome.item.raw_signals = {
-                **outcome.item.raw_signals,
-                "join_url_validation": {
-                    "ok": ok,
-                    "reason": reason,
-                    "details": details,
-                },
-            }
-            if not ok:
-                outcome.item.join_url = None  # clear bad link but keep the row
-                outcome.item.access_status = AccessStatus.WATCH
+        # Skip rows where HTML fetch didn't yield a join_url (Slack/WhatsApp link).
+        if not outcome.item.join_url:
+            metrics.skipped_junk += 1
+            continue
 
         if (
             outcome.item.access_status == AccessStatus.REJECT
