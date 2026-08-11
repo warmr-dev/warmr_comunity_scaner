@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 
-# Telegram + WhatsApp + Slack (Discord excluded).
+# Telegram + WhatsApp + Slack + Discord invite URL patterns.
 _SLACK_SHARED = re.compile(
     r"(?:https?://)?(?:[a-z0-9-]+\.)?slack\.com/(?:shared_invite/[A-Za-z0-9_-]+|ssb/redirect)",
     re.I,
@@ -29,6 +29,10 @@ _TELEGRAM_PUBLIC = re.compile(
     r"(?:https?://)?(?:t\.me|telegram\.me)/([A-Za-z][A-Za-z0-9_]{3,})/?(?:\d+)?(?:\?|$|[\"'\s<>])",
     re.I,
 )
+_DISCORD = re.compile(
+    r"(?:https?://)?(?:discord\.gg|discord\.com/invite)/([A-Za-z0-9_-]+)",
+    re.I,
+)
 
 _BARE_SLACK = re.compile(r"^https?://(?:www\.)?slack\.com/?$", re.I)
 _TELEGRAM_BLOCKED = {
@@ -45,6 +49,10 @@ _TELEGRAM_BLOCKED = {
     "premium",
     "boost",
 }
+
+# Require proven audience before upsert (Telegram shows counts; Slack/WA often unknown).
+MIN_MEMBERS_FOR_UPSERT = 100
+INVITE_SCAN_LIMIT = 500
 
 
 @dataclass(frozen=True)
@@ -71,7 +79,7 @@ def _normalize_candidate(url: str) -> str | None:
 
 
 def classify_invite_url(url: str) -> InviteMatch | None:
-    """Return InviteMatch for Telegram / WhatsApp / Slack join links."""
+    """Return InviteMatch for Telegram / WhatsApp / Slack / Discord join links."""
     url = _normalize_candidate(url)
     if not url:
         return None
@@ -110,8 +118,7 @@ def classify_invite_url(url: str) -> InviteMatch | None:
 
     m = _TELEGRAM.search(url)
     if m:
-        raw = _ensure_https(m.group(0))
-        return InviteMatch(url=raw, platform="telegram", rule="telegram_invite")
+        return InviteMatch(url=_ensure_https(m.group(0)), platform="telegram", rule="telegram_invite")
 
     m = _TELEGRAM_PUBLIC.match(url) or _TELEGRAM_PUBLIC.search(url + " ")
     if m:
@@ -124,6 +131,14 @@ def classify_invite_url(url: str) -> InviteMatch | None:
             rule="telegram_public",
         )
 
+    m = _DISCORD.search(url)
+    if m:
+        return InviteMatch(
+            url=f"https://discord.gg/{m.group(1)}",
+            platform="discord",
+            rule="discord_invite",
+        )
+
     return None
 
 
@@ -132,8 +147,8 @@ def find_invite_in_text(text: str) -> InviteMatch | None:
     return matches[0] if matches else None
 
 
-def find_all_invites_in_text(text: str, *, limit: int = 200) -> list[InviteMatch]:
-    """Collect unique Telegram / WhatsApp / Slack invites from free text / HTML."""
+def find_all_invites_in_text(text: str, *, limit: int = INVITE_SCAN_LIMIT) -> list[InviteMatch]:
+    """Collect unique chat invites from free text / HTML."""
     if not text:
         return []
     patterns = (
@@ -141,6 +156,7 @@ def find_all_invites_in_text(text: str, *, limit: int = 200) -> list[InviteMatch
         _SLACK_SHARED,
         _WHATSAPP_CHAT,
         _TELEGRAM,
+        _DISCORD,
         _SLACK_WORKSPACE,
         _TELEGRAM_PUBLIC,
     )
@@ -184,6 +200,8 @@ def invite_from_platform_page(website: str, platform: str | None, platform_id: s
             return InviteMatch(url=f"https://t.me/{platform_id}", platform="telegram", rule="telegram_platform_id")
     if platform_lc == "slack":
         return InviteMatch(url=f"https://{platform_id}.slack.com", platform="slack", rule="slack_platform_id")
+    if platform_lc == "discord":
+        return InviteMatch(url=f"https://discord.gg/{platform_id}", platform="discord", rule="discord_platform_id")
     if platform_lc == "whatsapp":
         return classify_invite_url(website or "")
     return None
@@ -193,16 +211,13 @@ MEMBERS_PATTERNS = re.compile(
     r"([\d,.]+)\s*(members|member|people|subscribers|users|subscribers?)",
     re.I,
 )
-# Telegram preview pages: "1 234 subscribers" / "12,345 members"
 TG_SIZE_PATTERNS = re.compile(
     r"([\d\s,.]+)\s*(subscribers?|members?|online)",
     re.I,
 )
-MIN_MEMBERS_FOR_UPSERT = 100
 
 
 def parse_member_count(text: str) -> tuple[int | None, str | None]:
-    """Best-effort audience size from invite / channel preview HTML."""
     if not text:
         return None, None
     for pattern in (TG_SIZE_PATTERNS, MEMBERS_PATTERNS):
@@ -215,7 +230,6 @@ def parse_member_count(text: str) -> tuple[int | None, str | None]:
                 n = int(digits)
             except ValueError:
                 continue
-            # Ignore years / tiny noise / absurd crawler junk
             if n < 2 or n > 50_000_000:
                 continue
             return n, m.group(0).strip()
@@ -223,7 +237,7 @@ def parse_member_count(text: str) -> tuple[int | None, str | None]:
 
 
 def enrich_invite_page(join_url: str, *, timeout_seconds: float = 8.0) -> dict:
-    """Fetch invite landing page and pull title + subscriber/member count."""
+    """Fetch invite page for title + subscriber count (metadata only)."""
     import httpx
 
     out: dict = {"ok": False, "url": join_url}
@@ -243,7 +257,6 @@ def enrich_invite_page(join_url: str, *, timeout_seconds: float = 8.0) -> dict:
                 return out
             html = resp.text or ""
         out["ok"] = True
-        # Prefer Telegram preview title block, then <title>
         name = None
         m = re.search(
             r'class="tgme_page_title[^"]*"[^>]*>\s*<span[^>]*>([^<]+)',
@@ -276,5 +289,7 @@ def invite_host_ok(url: str) -> bool:
             "wa.me",
             "t.me",
             "telegram.me",
+            "discord.gg",
+            "discord.com",
         )
     )

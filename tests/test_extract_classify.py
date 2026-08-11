@@ -51,7 +51,7 @@ def test_extract_multiple_invites():
     assert "https://chat.whatsapp.com/AbCdEfGhIjK" in urls
     assert any("join.slack.com" in u for u in urls)
     assert "https://t.me/datascienceusa" in urls
-    assert not any("discord" in u for u in urls)
+    assert "https://discord.gg/ignoreme" in urls
 
 
 def test_classify_invite_shapes():
@@ -60,7 +60,7 @@ def test_classify_invite_shapes():
     assert classify_invite_url("https://t.me/pythondevs")
     assert classify_invite_url("https://join.slack.com/t/foo/shared_invite/zt-1")
     assert classify_invite_url("https://joinhampton.slack.com")
-    assert classify_invite_url("https://discord.gg/abcdef") is None
+    assert classify_invite_url("https://discord.gg/abcdef")
     assert classify_invite_url("https://wa.me/15551234567") is None
     assert classify_invite_url("https://t.me/share") is None
 

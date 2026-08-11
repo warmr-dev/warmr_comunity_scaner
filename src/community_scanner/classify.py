@@ -19,9 +19,7 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
         item.value_tier = ValueTier.JUNK
         return item
 
-    # Prefer communities with a meaningful audience.
-    # Invite links without a proven size are rejected in pipeline upsert gate;
-    # here we still reject known-small communities.
+    # Require meaningful audience for invite links.
     if item.size_members is not None and item.size_members < 100:
         item.access_status = AccessStatus.REJECT
         item.value_tier = ValueTier.JUNK
@@ -30,7 +28,6 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
         return item
 
     if item.join_url and item.size_members is None:
-        # Unknown size after enrichment → not valuable enough yet.
         item.access_status = AccessStatus.REJECT
         item.value_tier = ValueTier.JUNK
         item.value_score = 0

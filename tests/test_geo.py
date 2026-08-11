@@ -7,14 +7,13 @@ def test_default_geo_is_usa():
     assert any("telegram" in q.lower() or "t.me" in q.lower() or "whatsapp" in q.lower() for q in queries)
 
 
-def test_tg_wa_slack_directory_templates():
-    queries = generate_queries(QueryParams(niche="education"), limit=40)
+def test_all_platform_directory_templates():
+    queries = generate_queries(QueryParams(niche="education"), limit=50)
     blob = " ".join(queries).lower()
     assert "tgstat" in blob or "t.me" in blob
     assert "whatsapp" in blob or "chat.whatsapp" in blob
     assert "slack" in blob or "join.slack" in blob
-    assert "discord" not in blob
-    assert "disboard" not in blob
+    assert "discord" in blob or "disboard" in blob
 
 
 def test_no_paid_dictionary_trap():

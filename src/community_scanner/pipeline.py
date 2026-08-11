@@ -83,6 +83,12 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
                 "this invite link is invalid",
                 "invite link is invalid or has expired",
             ],
+            "discord": [
+                "invite invalid",
+                "invalid invite",
+                "unable to accept invite",
+                "this invite may be expired",
+            ],
         }
         # Only trust invalid phrases when we actually got a readable success page.
         if 200 <= status_code < 400:
@@ -127,6 +133,11 @@ DIRECTORY_HOST_HINTS = (
     "whatsapp.com",
     "join.slack.com",
     "slack.com",
+    "discord.gg",
+    "discord.com",
+    "disboard.org",
+    "top.gg",
+    "discord.me",
 )
 
 
@@ -139,9 +150,19 @@ def _invite_priority(hit: DiscoveryHit, norm: NormalizedUrl) -> int:
         score += 100
     if any(h in url_lc for h in DIRECTORY_HOST_HINTS):
         score += 50
-    if any(x in blob for x in ("t.me/", "chat.whatsapp.com", "join.slack.com", "shared_invite")):
+    if any(
+        x in blob
+        for x in (
+            "t.me/",
+            "chat.whatsapp.com",
+            "join.slack.com",
+            "shared_invite",
+            "discord.gg",
+            "discord.com/invite",
+        )
+    ):
         score += 30
-    if any(x in blob for x in ("telegram", "whatsapp", "slack")):
+    if any(x in blob for x in ("telegram", "whatsapp", "slack", "discord")):
         score += 10
     return score
 
@@ -224,7 +245,6 @@ def _upsert_invite_item(
         item.size_members = int(meta["size_members"])
         item.size_text = meta.get("size_text") or item.size_text
 
-    # Quality gate: require real audience size.
     if item.size_members is None or item.size_members < MIN_MEMBERS_FOR_UPSERT:
         metrics.skipped_junk += 1
         item.raw_signals = {
@@ -679,16 +699,24 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.skipped_junk += 1
             continue
 
+        invite_meta = {
+            str(e.get("url", "")).lower().rstrip("/"): e
+            for e in (item.raw_signals.get("all_invites") or [])
+            if isinstance(e, dict) and e.get("url")
+        }
         for url in unique_urls:
+            meta = invite_meta.get(url.lower().rstrip("/"), {})
             expanded = _item_from_invite(
                 url,
                 scan_geo=item.geo or "USA",
                 niche=item.niche,
-                name=item.name,
+                name=(meta.get("anchor_text") or None) or item.name,
                 source_queries=list(item.source_queries or []),
                 raw_signals={
                     "from_page": item.website,
                     "source_canonical_key": item.canonical_key,
+                    "anchor_text": meta.get("anchor_text"),
+                    "invite_rule": meta.get("rule"),
                     **{k: v for k, v in (item.raw_signals or {}).items() if k != "all_invites"},
                 },
             )

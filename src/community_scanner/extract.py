@@ -179,7 +179,7 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         raw_signals={
             "heuristic_confidence": confidence,
             **({"join_url_source": join_url_meta} if join_url_meta else {}),
-            **({"all_invites": all_invites[:200]} if all_invites else {}),
+            **({"all_invites": all_invites[:500]} if all_invites else {}),
         },
         content_hash=content_hash,
         extraction_confidence=min(confidence, 1.0),
