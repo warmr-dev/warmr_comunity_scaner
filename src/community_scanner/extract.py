@@ -75,22 +75,38 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         except ValueError:
             size_members = None
 
-    # Prefer direct invite links for Discord/Slack/WhatsApp when present.
+    # Prefer direct invite links for Slack/WhatsApp when present.
     join_url = None
+    join_url_meta: dict[str, str | None] = {}
     for a in soup.find_all("a", href=True):
         href = str(a.get("href") or "")
         href_lc = href.lower()
-        if any(s in href_lc for s in ("discord.gg/", "discord.com/invite", "discord.gg", "slack.com/", "wa.me/","whatsapp.com/")):
-            # Tighten: require invite-ish paths/hosts.
-            if "discord.gg" in href_lc or "discord.com/invite" in href_lc:
-                join_url = href
-                break
-            if "slack.com" in href_lc and ("/invite/" in href_lc or "invite" in href_lc or "join" in href_lc):
-                join_url = urljoin(f"https://{normalized.canonical_domain}", href)
-                break
-            if ("wa.me" in href_lc) or ("whatsapp.com" in href_lc and ("invite" in href_lc or "join" in href_lc or "/send" in href_lc)):
-                join_url = urljoin(f"https://{normalized.canonical_domain}", href)
-                break
+        anchor_text = a.get_text(" ", strip=True) or None
+
+        # Slack invite
+        if "slack.com" in href_lc and (
+            "/invite/" in href_lc or "invite" in href_lc or "join" in href_lc
+        ):
+            join_url = urljoin(f"https://{normalized.canonical_domain}", href)
+            join_url_meta = {
+                "rule": "slack_invite_href",
+                "href": href,
+                "anchor_text": anchor_text,
+            }
+            break
+
+        # WhatsApp invite / contact
+        if ("wa.me" in href_lc) or (
+            "whatsapp.com" in href_lc
+            and ("invite" in href_lc or "join" in href_lc or "/send" in href_lc)
+        ):
+            join_url = urljoin(f"https://{normalized.canonical_domain}", href)
+            join_url_meta = {
+                "rule": "whatsapp_invite_href",
+                "href": href,
+                "anchor_text": anchor_text,
+            }
+            break
 
     if join_url:
         # Keep only non-empty URLs; normalize accidental whitespace.
@@ -98,9 +114,20 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
 
     if not join_url:
         for a in soup.find_all("a", href=True):
-            label = a.get_text(" ", strip=True)
-            if JOIN_PATTERNS.search(label) or APPLY_PATTERNS.search(label):
-                join_url = urljoin(f"https://{normalized.canonical_domain}", str(a["href"]))
+            href = str(a.get("href") or "")
+            href_lc = href.lower()
+            label = a.get_text(" ", strip=True) or None
+            if (
+                ("slack.com" in href_lc) or ("wa.me" in href_lc) or ("whatsapp.com" in href_lc)
+            ) and (JOIN_PATTERNS.search(label or "") or APPLY_PATTERNS.search(label or "")):
+                join_url = urljoin(
+                    f"https://{normalized.canonical_domain}", href
+                )
+                join_url_meta = {
+                    "rule": "join_label_href",
+                    "href": href,
+                    "anchor_text": label,
+                }
                 break
 
     emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", body, flags=re.I)
@@ -147,7 +174,10 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         contacts={"emails": sorted(set(e.lower() for e in emails))[:5]},
         access_status=access,
         source_queries=[query] if query else [],
-        raw_signals={"heuristic_confidence": confidence},
+        raw_signals={
+            "heuristic_confidence": confidence,
+            **({"join_url_source": join_url_meta} if join_url_meta else {}),
+        },
         content_hash=content_hash,
         extraction_confidence=min(confidence, 1.0),
         needs_llm=needs_llm,

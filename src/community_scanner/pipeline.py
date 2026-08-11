@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy.orm import Session
+from urllib.parse import urlparse
 
 from community_scanner.classify import classify
 from community_scanner.config import Settings
@@ -28,6 +29,56 @@ from community_scanner.store import save_discovery_hits, upsert_community
 
 USER_AGENT = "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
 log = logging.getLogger(__name__)
+
+
+def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[bool, str, dict]:
+    """Best-effort validation for community invite links.
+
+    We run a lightweight GET and look for known "invalid invite" phrases.
+    """
+    try:
+        parsed = urlparse(join_url)
+        host = (parsed.netloc or "").lower()
+        headers = {"User-Agent": USER_AGENT}
+
+        with httpx.Client(
+            timeout=timeout_seconds,
+            follow_redirects=True,
+            headers=headers,
+            verify=False,
+        ) as client:
+            resp = client.get(join_url)
+            status_code = resp.status_code
+            text_lc = (resp.text or "").lower()
+
+        if "slack.com" in host:
+            invalid_phrases = [
+                "invite invalid",
+                "this invite may be expired",
+                "might not have permission to join",
+                "does not appear to be a valid invite",
+            ]
+            if status_code >= 400:
+                return False, "slack_http_error", {"status_code": status_code}
+            if any(p in text_lc for p in invalid_phrases):
+                return (
+                    False,
+                    "slack_invite_invalid_phrase",
+                    {"status_code": status_code},
+                )
+            return True, "ok", {"status_code": status_code}
+
+        if "wa.me" in host or "whatsapp.com" in host:
+            if status_code >= 400:
+                return False, "whatsapp_http_error", {"status_code": status_code}
+            invalid_phrases = ["404", "not found", "phone number"]
+            if any(p in text_lc for p in invalid_phrases):
+                return False, "whatsapp_invalid_phrase", {"status_code": status_code}
+            return True, "ok", {"status_code": status_code}
+
+        return False, "unsupported_join_platform", {"host": host}
+    except Exception as exc:  # noqa: BLE001
+        return False, "join_url_validation_exception", {"error": str(exc)[:200]}
 
 
 def _start_run(session: Session) -> str:
@@ -292,17 +343,13 @@ def _stub_from_serp(
 ) -> ExtractedCommunity:
     """Persist SERP hit immediately (no fetch) for volume toward 10k rows."""
     hit_url_lc = (hit.url or "").lower()
-    is_invite = any(
-        s in hit_url_lc
-        for s in (
-            "discord.gg/",
-            "discord.com/invite",
-            "slack.com/invite",
-            "slack.com/",
-            "wa.me/",
-            "whatsapp.com/",
-        )
-    )
+    join_url_source_rule = None
+    if "slack.com/invite" in hit_url_lc or "slack.com/" in hit_url_lc:
+        join_url_source_rule = "slack_serp_invite_url"
+    if "wa.me/" in hit_url_lc or "whatsapp.com/" in hit_url_lc:
+        join_url_source_rule = "whatsapp_serp_invite_url"
+
+    is_invite = join_url_source_rule is not None
 
     junk = bool(
         JUNK_HINTS.search(" ".join(filter(None, [hit.url, hit.title or "", hit.snippet or ""])))
@@ -328,6 +375,16 @@ def _stub_from_serp(
             "serp_stub": True,
             "snippet": hit.snippet,
             "provider": hit.provider,
+            **(
+                {
+                    "join_url_source": {
+                        "rule": join_url_source_rule,
+                        "hit_url": hit.url,
+                    }
+                }
+                if join_url_source_rule
+                else {}
+            ),
         },
         needs_llm=False,
     )
@@ -343,6 +400,22 @@ def apply_serp_stubs(
 ) -> None:
     for hit, norm in candidates:
         item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
+
+        # Validate invite links before writing to Supabase.
+        if item.join_url and item.access_status != AccessStatus.REJECT:
+            ok, reason, details = _validate_join_url(item.join_url)
+            item.raw_signals = {
+                **item.raw_signals,
+                "join_url_validation": {
+                    "ok": ok,
+                    "reason": reason,
+                    "details": details,
+                },
+            }
+            if not ok:
+                item.access_status = AccessStatus.REJECT
+                item.value_tier = ValueTier.JUNK
+                item.value_score = 0
         if (
             item.access_status == AccessStatus.REJECT
             or item.value_tier == ValueTier.JUNK
@@ -367,6 +440,22 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
         else:
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
+
+        # Validate invite links before writing to Supabase.
+        if outcome.item.join_url and outcome.item.access_status != AccessStatus.REJECT:
+            ok, reason, details = _validate_join_url(outcome.item.join_url)
+            outcome.item.raw_signals = {
+                **outcome.item.raw_signals,
+                "join_url_validation": {
+                    "ok": ok,
+                    "reason": reason,
+                    "details": details,
+                },
+            }
+            if not ok:
+                outcome.item.access_status = AccessStatus.REJECT
+                outcome.item.value_tier = ValueTier.JUNK
+                outcome.item.value_score = 0
 
         if (
             outcome.item.access_status == AccessStatus.REJECT
