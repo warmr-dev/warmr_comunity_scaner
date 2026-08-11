@@ -401,7 +401,7 @@ def apply_serp_stubs(
     for hit, norm in candidates:
         item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
 
-        # Validate invite links before writing to Supabase.
+        # Validate invite links only when present; a missing join_url is still upserted.
         if item.join_url and item.access_status != AccessStatus.REJECT:
             ok, reason, details = _validate_join_url(item.join_url)
             item.raw_signals = {
@@ -413,14 +413,9 @@ def apply_serp_stubs(
                 },
             }
             if not ok:
-                item.access_status = AccessStatus.REJECT
-                item.value_tier = ValueTier.JUNK
-                item.value_score = 0
-        if (
-            item.access_status == AccessStatus.REJECT
-            or item.value_tier == ValueTier.JUNK
-            or not item.join_url
-        ):
+                item.join_url = None  # clear bad link but keep the row
+                item.access_status = AccessStatus.WATCH
+        if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
             metrics.skipped_junk += 1
             continue
 
@@ -441,7 +436,7 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        # Validate invite links before writing to Supabase.
+        # Validate invite links only when present; a missing join_url keeps the row.
         if outcome.item.join_url and outcome.item.access_status != AccessStatus.REJECT:
             ok, reason, details = _validate_join_url(outcome.item.join_url)
             outcome.item.raw_signals = {
@@ -453,14 +448,12 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
                 },
             }
             if not ok:
-                outcome.item.access_status = AccessStatus.REJECT
-                outcome.item.value_tier = ValueTier.JUNK
-                outcome.item.value_score = 0
+                outcome.item.join_url = None  # clear bad link but keep the row
+                outcome.item.access_status = AccessStatus.WATCH
 
         if (
             outcome.item.access_status == AccessStatus.REJECT
             or outcome.item.value_tier == ValueTier.JUNK
-            or not outcome.item.join_url
         ):
             metrics.skipped_junk += 1
             continue
