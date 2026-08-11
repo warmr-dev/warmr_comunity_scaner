@@ -29,7 +29,7 @@ def test_niche_to_tag_aliases():
 def test_extract_tgstat_channel_urls():
     urls = extract_tgstat_channel_urls(TAG_HTML)
     assert "https://tgstat.com/channel/@LearnPython3" in urls
-    assert "https://tgstat.ru/en/channel/@python2day" in urls
+    assert "https://tgstat.com/channel/@python2day" in urls
 
 
 def test_parse_tgstat_subscribers():

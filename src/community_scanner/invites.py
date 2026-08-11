@@ -48,6 +48,13 @@ _TELEGRAM_BLOCKED = {
     "setlanguage",
     "premium",
     "boost",
+    "telegram",
+    "desktop",
+    "telegramtips",
+    "discord",
+    "whatsapp",
+    "download",
+    "developers",
 }
 
 # Require proven audience before upsert (Telegram shows counts; Slack/WA often unknown).

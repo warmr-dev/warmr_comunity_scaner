@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # Discovery scope (USA-only by default).
     pipe_geo: str = "USA"
+    pipe_language: str = "en"
     pipe_niche: str = "business"
     pipe_audience: str = "professionals"
     searxng_language: str = "en-US"

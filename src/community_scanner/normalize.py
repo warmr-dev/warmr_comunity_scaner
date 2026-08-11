@@ -4,6 +4,7 @@ import re
 from urllib.parse import urlparse, urlunparse
 
 from community_scanner.content_filter import ADULT_CONTENT_RE, is_adult_content
+from community_scanner.language_filter import is_non_english_content
 from community_scanner.models import NormalizedUrl, Platform
 
 # Volume mode: only skip pure search engines / video hosts (not useful as communities).
@@ -156,6 +157,8 @@ def looks_like_community(url: str, title: str | None = None, snippet: str | None
     """Cheap pre-fetch filter: keep community-like SERP hits only."""
     blob = " ".join(filter(None, [url, title or "", snippet or ""]))
     if is_adult_content(blob):
+        return False
+    if is_non_english_content(blob):
         return False
     if JUNK_HINTS.search(blob):
         return False

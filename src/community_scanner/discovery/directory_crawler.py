@@ -9,6 +9,11 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from community_scanner.content_filter import is_adult_community
+from community_scanner.language_filter import (
+    is_non_english_community,
+    is_regional_tgstat_url,
+    normalize_tgstat_channel_url,
+)
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams
 from community_scanner.invites import (
     MIN_MEMBERS_FOR_UPSERT,
@@ -102,6 +107,9 @@ def extract_tgstat_channel_urls(html: str) -> list[str]:
     for match in TGSTAT_CHANNEL_RE.finditer(html or ""):
         url = match.group(0).split("?")[0]
         url = re.sub(r"/stat$", "", url, flags=re.I)
+        url = normalize_tgstat_channel_url(url)
+        if is_regional_tgstat_url(url):
+            continue
         key = url.lower()
         if key in seen:
             continue
@@ -155,9 +163,6 @@ def crawl_tgstat(
     tag = niche_to_tag(niche)
     listing_urls = [
         f"https://tgstat.com/en/tag/{tag}",
-        f"https://tgstat.com/tag/{tag}",
-        f"https://tgstat.ru/en/tag/{tag}",
-        f"https://tgstat.com/en/ratings/channels?search={tag}",
     ]
 
     channel_urls: list[str] = []
@@ -202,6 +207,15 @@ def crawl_tgstat(
             url=invite_url,
             platform_id=username.lstrip("@"),
             html=html,
+        ):
+            continue
+
+        if is_non_english_community(
+            name=title,
+            url=invite_url,
+            platform_id=username.lstrip("@"),
+            html=html,
+            source_url=channel_url,
         ):
             continue
 
@@ -253,6 +267,8 @@ def crawl_disboard(
             seen.add(key)
             size, size_text = parse_member_count(page_html)
             if is_adult_community(name=title, url=discord.url, html=page_html):
+                continue
+            if is_non_english_community(name=title, url=discord.url, html=page_html, source_url=page_url):
                 continue
             entries.append(
                 DirectoryEntry(
@@ -317,6 +333,9 @@ def crawl_discordservers(
         size, size_text = parse_member_count(page_html)
 
         if is_adult_community(name=title, url=invite.url, html=page_html):
+            continue
+
+        if is_non_english_community(name=title, url=invite.url, html=page_html, source_url=page_url):
             continue
 
         entries.append(
