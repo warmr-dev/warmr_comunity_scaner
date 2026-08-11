@@ -59,6 +59,8 @@ _TELEGRAM_BLOCKED = {
 
 # Require proven audience before upsert (Telegram shows counts; Slack/WA often unknown).
 MIN_MEMBERS_FOR_UPSERT = 100
+# Platforms that rarely expose public member counts — allow upsert without size.
+SIZE_OPTIONAL_PLATFORMS = frozenset({"whatsapp", "slack"})
 INVITE_SCAN_LIMIT = 500
 
 

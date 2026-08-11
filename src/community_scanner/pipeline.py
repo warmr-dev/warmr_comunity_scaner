@@ -16,6 +16,7 @@ from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
 from community_scanner.invites import (
     MIN_MEMBERS_FOR_UPSERT,
+    SIZE_OPTIONAL_PLATFORMS,
     classify_invite_url,
     enrich_invite_page,
     find_all_invites_in_text,
@@ -295,7 +296,17 @@ def _upsert_invite_item(
                 item.size_text = parsed_text or item.size_text
                 break
 
-    if item.size_members is None or item.size_members < MIN_MEMBERS_FOR_UPSERT:
+    platform_lc = (invite.platform or "").lower()
+    size_optional = platform_lc in SIZE_OPTIONAL_PLATFORMS
+    if item.size_members is not None and item.size_members < MIN_MEMBERS_FOR_UPSERT:
+        metrics.skipped_junk += 1
+        item.raw_signals = {
+            **item.raw_signals,
+            "reject_reason": "too_small",
+            "min_members": MIN_MEMBERS_FOR_UPSERT,
+        }
+        return
+    if item.size_members is None and not size_optional:
         metrics.skipped_junk += 1
         item.raw_signals = {
             **item.raw_signals,

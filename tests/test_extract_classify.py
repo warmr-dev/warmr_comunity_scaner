@@ -126,3 +126,41 @@ def test_classify_rejects_unknown_size_invite():
     out = classify(item)
     assert out.access_status == AccessStatus.REJECT
     assert out.raw_signals.get("reject_reason") == "unknown_size"
+
+
+def test_classify_keeps_whatsapp_without_size():
+    from community_scanner.models import ExtractedCommunity, Platform
+
+    item = ExtractedCommunity(
+        website="https://chat.whatsapp.com/AbCdEfGhIjK",
+        canonical_key="whatsapp:abcdefghijk",
+        canonical_domain="chat.whatsapp.com",
+        platform=Platform.WHATSAPP,
+        platform_id="AbCdEfGhIjK",
+        name="IT Devs WA",
+        join_url="https://chat.whatsapp.com/AbCdEfGhIjK",
+        size_members=None,
+        access_status=AccessStatus.JOIN,
+    )
+    out = classify(item)
+    assert out.access_status != AccessStatus.REJECT
+    assert out.value_tier != ValueTier.JUNK
+
+
+def test_classify_keeps_slack_without_size():
+    from community_scanner.models import ExtractedCommunity, Platform
+
+    item = ExtractedCommunity(
+        website="https://join.slack.com/t/devguild/shared_invite/zt-abc",
+        canonical_key="slack:devguild",
+        canonical_domain="join.slack.com",
+        platform=Platform.SLACK,
+        platform_id="devguild",
+        name="Dev Guild Slack",
+        join_url="https://join.slack.com/t/devguild/shared_invite/zt-abc",
+        size_members=None,
+        access_status=AccessStatus.JOIN,
+    )
+    out = classify(item)
+    assert out.access_status != AccessStatus.REJECT
+    assert out.value_tier != ValueTier.JUNK

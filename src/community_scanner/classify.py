@@ -48,6 +48,12 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
         return item
 
     # Require meaningful audience for invite links.
+    # WhatsApp/Slack rarely expose public counts — allow unknown size for them.
+    from community_scanner.invites import SIZE_OPTIONAL_PLATFORMS
+
+    platform_lc = getattr(item.platform, "value", str(item.platform or "")).lower()
+    size_optional = platform_lc in SIZE_OPTIONAL_PLATFORMS
+
     if item.size_members is not None and item.size_members < 100:
         item.access_status = AccessStatus.REJECT
         item.value_tier = ValueTier.JUNK
@@ -55,7 +61,7 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
         item.raw_signals = {**signals, "reject_reason": "too_small"}
         return item
 
-    if item.join_url and item.size_members is None:
+    if item.join_url and item.size_members is None and not size_optional:
         item.access_status = AccessStatus.REJECT
         item.value_tier = ValueTier.JUNK
         item.value_score = 0
