@@ -10,8 +10,8 @@ import httpx
 
 from community_scanner.content_filter import is_adult_community
 from community_scanner.language_filter import (
-    is_non_english_community,
-    is_regional_tgstat_url,
+    is_russian_community,
+    is_russian_tgstat_url,
     normalize_tgstat_channel_url,
 )
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams
@@ -108,7 +108,7 @@ def extract_tgstat_channel_urls(html: str) -> list[str]:
         url = match.group(0).split("?")[0]
         url = re.sub(r"/stat$", "", url, flags=re.I)
         url = normalize_tgstat_channel_url(url)
-        if is_regional_tgstat_url(url):
+        if is_russian_tgstat_url(url):
             continue
         key = url.lower()
         if key in seen:
@@ -210,7 +210,7 @@ def crawl_tgstat(
         ):
             continue
 
-        if is_non_english_community(
+        if is_russian_community(
             name=title,
             url=invite_url,
             platform_id=username.lstrip("@"),
@@ -268,7 +268,7 @@ def crawl_disboard(
             size, size_text = parse_member_count(page_html)
             if is_adult_community(name=title, url=discord.url, html=page_html):
                 continue
-            if is_non_english_community(name=title, url=discord.url, html=page_html, source_url=page_url):
+            if is_russian_community(name=title, url=discord.url, html=page_html, source_url=page_url):
                 continue
             entries.append(
                 DirectoryEntry(
@@ -335,7 +335,7 @@ def crawl_discordservers(
         if is_adult_community(name=title, url=invite.url, html=page_html):
             continue
 
-        if is_non_english_community(name=title, url=invite.url, html=page_html, source_url=page_url):
+        if is_russian_community(name=title, url=invite.url, html=page_html, source_url=page_url):
             continue
 
         entries.append(

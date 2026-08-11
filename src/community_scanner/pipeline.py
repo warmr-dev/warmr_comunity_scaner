@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from community_scanner.classify import classify
 from community_scanner.config import Settings
 from community_scanner.content_filter import is_adult_community
-from community_scanner.language_filter import is_non_english_community
+from community_scanner.language_filter import is_russian_community
 from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
@@ -193,7 +193,7 @@ def _item_from_invite(
         snippet=str(raw_signals.get("snippet") or raw_signals.get("directory_size_text") or ""),
     ):
         return None
-    if is_non_english_community(
+    if is_russian_community(
         name=name,
         url=invite.url,
         platform_id=norm.platform_id,
@@ -244,7 +244,7 @@ def _upsert_invite_item(
         metrics.skipped_junk += 1
         item.raw_signals = {**item.raw_signals, "reject_reason": "adult_content"}
         return
-    if is_non_english_community(
+    if is_russian_community(
         name=item.name,
         url=item.join_url,
         platform_id=item.platform_id,
@@ -252,7 +252,7 @@ def _upsert_invite_item(
         source_url=str(item.raw_signals.get("from_page") or item.raw_signals.get("hit_url") or ""),
     ):
         metrics.skipped_junk += 1
-        item.raw_signals = {**item.raw_signals, "reject_reason": "non_english"}
+        item.raw_signals = {**item.raw_signals, "reject_reason": "russian_content"}
         return
     invite = classify_invite_url(item.join_url)
     if not invite:
