@@ -12,7 +12,11 @@ from community_scanner.config import Settings
 from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
-from community_scanner.invites import classify_invite_url, find_invite_in_text
+from community_scanner.invites import (
+    classify_invite_url,
+    find_invite_in_text,
+    invite_from_platform_page,
+)
 from community_scanner.models import (
     AccessStatus,
     DiscoveryHit,
@@ -95,8 +99,8 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
         return True, "ok_shape_only", details
 
 
-def _invite_from_hit(hit: DiscoveryHit):
-    """Prefer direct hit URL, then invite buried in title/snippet."""
+def _invite_from_hit(hit: DiscoveryHit, norm: NormalizedUrl | None = None):
+    """Prefer direct hit URL, then invite buried in title/snippet, then platform page."""
     invite = classify_invite_url(hit.url or "")
     if invite:
         return invite, "hit_url"
@@ -104,6 +108,14 @@ def _invite_from_hit(hit: DiscoveryHit):
     invite = find_invite_in_text(blob)
     if invite:
         return invite, "serp_snippet"
+    if norm is not None:
+        invite = invite_from_platform_page(
+            norm.website,
+            getattr(norm.platform, "value", str(norm.platform)),
+            norm.platform_id,
+        )
+        if invite:
+            return invite, "platform_page"
     return None, None
 
 
@@ -255,7 +267,7 @@ def _extract_and_classify(
     item = heuristic_extract(html, norm, query=hit.query)
     # If the SERP URL (or snippet) already is an invite, keep it even when HTML has none.
     if not item.join_url:
-        invite, source = _invite_from_hit(hit)
+        invite, source = _invite_from_hit(hit, norm)
         if invite:
             item = item.model_copy(
                 update={
@@ -307,7 +319,7 @@ async def _process_candidate_async(
             html = resp.text
         except Exception as exc:  # noqa: BLE001
             # Still salvage if the URL itself is a valid invite shape.
-            invite, source = _invite_from_hit(hit)
+            invite, source = _invite_from_hit(hit, norm)
             if invite:
                 item = ExtractedCommunity(
                     website=norm.website,
@@ -416,7 +428,7 @@ def _stub_from_serp(
     niche: str | None = None,
 ) -> ExtractedCommunity:
     """Persist SERP hit when URL or snippet contains a direct invite."""
-    invite, source = _invite_from_hit(hit)
+    invite, source = _invite_from_hit(hit, norm)
     store_norm = norm
     if invite:
         store_norm = normalize_url(invite.url)

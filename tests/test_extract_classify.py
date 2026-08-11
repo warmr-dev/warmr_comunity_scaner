@@ -51,7 +51,16 @@ def test_classify_invite_shapes():
     assert classify_invite_url("https://chat.whatsapp.com/AbCdEfGhIjK")
     assert classify_invite_url("https://t.me/+AbCdEfGhIjK")
     assert classify_invite_url("https://discord.gg/abcdef")
+    assert classify_invite_url("discord.gg/abcdef")
     assert classify_invite_url("https://joinhampton.slack.com")
     assert classify_invite_url("https://slack.com") is None
     assert classify_invite_url("https://wa.me/15551234567") is None
     assert classify_invite_url("https://t.me/share") is None
+
+
+def test_find_invite_bare_discord():
+    from community_scanner.invites import find_invite_in_text
+
+    match = find_invite_in_text("Join us at discord.gg/accountingpros today")
+    assert match is not None
+    assert match.url == "https://discord.gg/accountingpros"

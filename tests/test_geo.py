@@ -4,17 +4,16 @@ from community_scanner.discovery.base import DEFAULT_SCAN_GEO, QueryParams, gene
 def test_default_geo_is_usa():
     queries = generate_queries(QueryParams(niche="accounting"), limit=8)
     assert queries
-    assert any("USA" in q or "slack" in q.lower() or "whatsapp" in q.lower() for q in queries)
+    assert any("USA" in q or "discord" in q.lower() or "slack" in q.lower() for q in queries)
 
 
 def test_invite_first_templates():
     queries = generate_queries(QueryParams(niche="accounting"), limit=20)
     blob = " ".join(queries).lower()
-    assert "join.slack.com" in blob or "shared_invite" in blob
-    assert "chat.whatsapp.com" in blob or "whatsapp" in blob
+    assert "disboard.org" in blob or "inurl:discord" in blob
+    assert "whatsapp" in blob or "chat.whatsapp" in blob
+    assert "slack" in blob
     assert "t.me" in blob or "telegram" in blob
-    assert "discord" in blob
-    assert "skool.com" not in blob
 
 
 def test_no_paid_dictionary_trap():

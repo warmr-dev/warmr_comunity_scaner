@@ -15,33 +15,32 @@ class QueryParams:
     community_type: str | None = None
 
 
-# Invite-first discovery: surface Slack / WhatsApp / Telegram / Discord join links.
-# Generic "community" SERPs almost never contain direct chat invites.
+# Prefer directories + inurl operators — Bing rarely indexes bare invite URLs in generic SERP.
 USA_TEMPLATES = [
-    '"{niche}" "join.slack.com"',
-    '"{niche}" slack.com/shared_invite',
-    '"{niche}" slack invite {geo}',
-    '"{niche}" slack community invite',
-    "{niche} professionals slack workspace",
-    '"{niche}" chat.whatsapp.com',
-    '"{niche}" whatsapp group invite {geo}',
-    '"{niche}" whatsapp community invite',
-    '"{niche}" "t.me/+" OR "t.me/joinchat"',
-    '"{niche}" telegram group invite {geo}',
-    '"{niche}" telegram channel {geo}',
-    '"{niche}" discord.gg',
-    '"{niche}" discord.com/invite',
-    "{niche} discord invite {geo}",
-    "site:join.slack.com {niche}",
-    "site:chat.whatsapp.com {niche}",
+    "site:disboard.org {niche}",
+    "site:disboard.org/server {niche}",
+    "site:top.gg/servers {niche}",
+    "site:discord.me {niche}",
+    "inurl:discord.gg {niche}",
+    "inurl:discord.com/invite {niche}",
+    "inurl:chat.whatsapp.com {niche}",
+    "inurl:join.slack.com {niche}",
+    "inurl:shared_invite {niche}",
     "site:t.me {niche}",
+    "inurl:t.me {niche}",
+    '"{niche}" discord.gg/',
+    '"{niche}" chat.whatsapp.com/',
+    '"{niche}" join.slack.com/t/',
+    '"{niche}" "t.me/+"',
+    "{niche} discord server invite {geo}",
+    "{niche} slack workspace invite {geo}",
+    "{niche} telegram group {geo} t.me",
+    "{niche} whatsapp group invite {geo}",
     "site:discord.gg {niche}",
-    "{niche} founders slack invite",
-    "{niche} founders discord invite",
-    "{niche} mastermind slack invite",
-    "{niche} peer group whatsapp",
+    "site:chat.whatsapp.com {niche}",
+    "site:join.slack.com {niche}",
+    "{audience} {niche} discord invite",
     "{audience} {niche} slack invite",
-    "{audience} {niche} telegram group",
 ]
 
 
