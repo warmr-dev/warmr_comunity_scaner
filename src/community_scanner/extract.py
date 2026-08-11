@@ -43,6 +43,10 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
     body = _text(soup)
 
     access = AccessStatus.WATCH
+    body_lc = body.lower()
+    # Exclude adult/18+ content early.
+    if re.search(r"(18\+|adult|porn|nsfw|explicit|onlyfans|hentai|lewd)", body_lc, flags=re.I):
+        access = AccessStatus.REJECT
     if APPLY_PATTERNS.search(body):
         access = AccessStatus.APPLY
     elif JOIN_PATTERNS.search(body):
@@ -70,12 +74,29 @@ def heuristic_extract(html: str, normalized: NormalizedUrl, query: str | None = 
         except ValueError:
             size_members = None
 
+    # Prefer direct invite links for Discord/Slack/WhatsApp when present.
     join_url = None
     for a in soup.find_all("a", href=True):
-        label = a.get_text(" ", strip=True)
-        if JOIN_PATTERNS.search(label) or APPLY_PATTERNS.search(label):
-            join_url = a["href"]
-            break
+        href = str(a.get("href") or "")
+        href_lc = href.lower()
+        if any(s in href_lc for s in ("discord.gg/", "discord.com/invite", "discord.gg", "slack.com/", "wa.me/","whatsapp.com/")):
+            # Tighten: require invite-ish paths/hosts.
+            if "discord.gg" in href_lc or "discord.com/invite" in href_lc:
+                join_url = href
+                break
+            if "slack.com" in href_lc and ("/invite/" in href_lc or "invite" in href_lc or "join" in href_lc):
+                join_url = href
+                break
+            if ("wa.me" in href_lc) or ("whatsapp.com" in href_lc and ("invite" in href_lc or "join" in href_lc or "/send" in href_lc)):
+                join_url = href
+                break
+
+    if not join_url:
+        for a in soup.find_all("a", href=True):
+            label = a.get_text(" ", strip=True)
+            if JOIN_PATTERNS.search(label) or APPLY_PATTERNS.search(label):
+                join_url = a["href"]
+                break
 
     emails = re.findall(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", body, flags=re.I)
 

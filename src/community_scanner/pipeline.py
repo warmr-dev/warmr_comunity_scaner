@@ -291,9 +291,25 @@ def _stub_from_serp(
     niche: str | None = None,
 ) -> ExtractedCommunity:
     """Persist SERP hit immediately (no fetch) for volume toward 10k rows."""
+    hit_url_lc = (hit.url or "").lower()
+    is_invite = any(
+        s in hit_url_lc
+        for s in (
+            "discord.gg/",
+            "discord.com/invite",
+            "slack.com/invite",
+            "slack.com/",
+            "wa.me/",
+            "whatsapp.com/",
+        )
+    )
+
     junk = bool(
         JUNK_HINTS.search(" ".join(filter(None, [hit.url, hit.title or "", hit.snippet or ""])))
     )
+
+    access = AccessStatus.JOIN if is_invite and not junk else AccessStatus.WATCH
+    join_url = hit.url if is_invite and not junk else None
     return ExtractedCommunity(
         website=norm.website,
         canonical_key=norm.canonical_key,
@@ -303,7 +319,8 @@ def _stub_from_serp(
         name=hit.title or norm.canonical_domain,
         niche=niche,
         geo=scan_geo,
-        access_status=AccessStatus.WATCH,
+        join_url=join_url,
+        access_status=access,
         value_tier=ValueTier.JUNK if junk else ValueTier.LOW,
         value_score=0 if junk else 15,
         source_queries=[hit.query] if hit.query else [],
@@ -326,8 +343,14 @@ def apply_serp_stubs(
 ) -> None:
     for hit, norm in candidates:
         item = _stub_from_serp(hit, norm, scan_geo=scan_geo, niche=niche)
-        if item.value_tier == ValueTier.JUNK:
+        if (
+            item.access_status == AccessStatus.REJECT
+            or item.value_tier == ValueTier.JUNK
+            or not item.join_url
+        ):
             metrics.skipped_junk += 1
+            continue
+
         _, created, changed = upsert_community(session, item)
         if created:
             metrics.upserted_new += 1
@@ -345,8 +368,13 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             metrics.fetch_errors += 1
         metrics.llm_calls += outcome.llm_calls
 
-        if outcome.item.access_status == AccessStatus.REJECT or outcome.item.value_tier == ValueTier.JUNK:
+        if (
+            outcome.item.access_status == AccessStatus.REJECT
+            or outcome.item.value_tier == ValueTier.JUNK
+            or not outcome.item.join_url
+        ):
             metrics.skipped_junk += 1
+            continue
 
         _, created, changed = upsert_community(session, outcome.item)
         if created:
@@ -496,7 +524,7 @@ def run_pipeline(
         # Volume: write every unique SERP hit immediately, then enrich via fetch.
         apply_serp_stubs(
             session,
-            unique_candidates,
+            unique_candidates[:max_fetch],
             metrics,
             scan_geo=scan_geo,
             niche=params.niche,

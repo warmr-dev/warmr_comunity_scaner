@@ -19,6 +19,15 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
         item.value_tier = ValueTier.JUNK
         return item
 
+    # Prefer communities with a meaningful audience when we have a signal.
+    # If we already found a direct invite/join URL, keep it even if members_count is missing.
+    if not item.join_url and item.size_members is not None and item.size_members < 50:
+        item.access_status = AccessStatus.REJECT
+        item.value_tier = ValueTier.JUNK
+        item.value_score = 0
+        item.raw_signals = {**signals, "reject_reason": "too_small"}
+        return item
+
     # Reject dictionary / tax-software / explainer SERP noise after fetch
     blob = " ".join(filter(None, [item.name, item.website, item.join_url]))
     if JUNK_HINTS.search(blob) and not looks_like_community(item.website, item.name, None):

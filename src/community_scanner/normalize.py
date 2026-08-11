@@ -37,7 +37,9 @@ JUNK_HINTS = re.compile(
     r"(definition|meaning|dictionary|thesaurus|payed\s+vs|paid\s+vs|"
     r"lorem\s+ipsum|placeholder\s+query|crossword|chemical\s+equation|"
     r"file\s+taxes|tax\s+software|best\s+restaurants|hotel|best\s+buy|"
-    r"what\s+is\s+accounting|accounting\s+basics|cpa\s+exam)",
+    r"what\s+is\s+accounting|accounting\s+basics|cpa\s+exam|"
+    # NSFW / adult content (exclude 18+)
+    r"18\+|adult|porn|nsfw|explicit|xxx|onlyfans|hentai|lewd)",
     re.I,
 )
 
