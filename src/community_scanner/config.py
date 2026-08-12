@@ -16,8 +16,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     use_fetch_queue: bool = False
 
-    # Primary web search: brave. Also: directory, seeds.
-    discovery_providers: str = "brave"
+    searxng_base_url: str = "http://127.0.0.1:8080"
+    # Primary: searxng. Optional: directory, seeds, brave.
+    discovery_providers: str = "searxng"
     discovery_concurrency: int = Field(default=2, ge=1, le=50)
     brave_search_api_key: str = ""
     brave_country: str = "us"
@@ -48,6 +49,7 @@ class Settings(BaseSettings):
     pipe_language: str = "non-ru"
     pipe_niche: str = "business"
     pipe_audience: str = "professionals"
+    searxng_language: str = "en-US"
 
     @property
     def discovery_provider_list(self) -> list[str]:

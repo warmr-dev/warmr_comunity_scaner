@@ -1,87 +1,60 @@
-# ~~Production setup: SearXNG + Redis queue + Supabase~~ (deprecated)
+# Production setup: SearXNG + Supabase (`community_scanner`)
 
-> **Deprecated.** SearXNG removed from the runtime. Use [`supabase-brave-setup.md`](supabase-brave-setup.md).
+Project ref: `bpxiawuzidhjalaemejy` (name: scanner)
 
-# Production setup: SearXNG + Redis queue + Supabase
+## Services
 
-## Services on Railway
+| Piece | Role |
+|-------|------|
+| Railway scanner image | Bundled SearXNG + pipeline (`BUNDLE_SEARXNG=true`) |
+| Supabase | Postgres `community_scanner` |
+| Redis (optional) | Fetch queue for large batches (`USE_FETCH_QUEUE=true`) |
 
-| Service | Purpose |
-|---------|---------|
-| `warmr_comunity_scaner` | Scanner cron (discovery + fetch worker) |
-| `searxng` | Global web search (`DISCOVERY_PROVIDERS=searxng`) |
-| `redis` | Fetch queue for large batches |
-| Supabase | Postgres `community_scanner` table |
+## Core env
 
-Optional: **2–3 replicas** of scanner with `SCANNER_MODE=worker` to scale fetch linearly.
+```env
+DISCOVERY_PROVIDERS=searxng
+SEARXNG_BASE_URL=http://127.0.0.1:8080
+SEARXNG_LANGUAGE=en-US
+BUNDLE_SEARXNG=true
+DISCOVERY_CONCURRENCY=1
+CRAWL_DOWNLOAD_DELAY_SECONDS=0.6
 
-## 1. Supabase
+PIPE_GEO=USA
+PIPE_NICHES=software-engineering,education
+PIPE_QUERIES=50
+PIPE_PER_QUERY=25
+PIPE_MAX_FETCH=200
+NICHE_LOOPS=20
+SCANNER_MODE=run
+```
+
+## High volume (many invites)
+
+1. Keep `DISCOVERY_CONCURRENCY=1` and delay ≥0.5s — Bing bans faster bursts from Railway IPs.
+2. Raise volume via **more niches + NICHE_LOOPS**, not concurrency.
+3. For 100k–1M **fetch**, split:
+   - discovery cron (`SCANNER_MODE=discovery` / `run`)
+   - Redis + 2–3 workers (`USE_FETCH_QUEUE=true`, `SCANNER_MODE=worker`, `FETCH_CONCURRENCY=100`)
+
+## Speed tuning (fetch)
+
+```env
+FETCH_CONCURRENCY=100
+HTTP_TIMEOUT_SECONDS=10
+FETCH_BATCH_SIZE=1000
+WORKER_MAX_ITEMS=1000000
+```
+
+| Sites | 1 worker @ 100 concurrency | 3 workers |
+|-------|----------------------------|-----------|
+| 100k | ~25 min | ~8 min |
+| 1M | ~4 h | ~1.3 h |
+
+## DB
 
 ```env
 DATABASE_URL=postgresql+psycopg://postgres.bpxiawuzidhjalaemejy:PASSWORD@aws-0-eu-west-2.pooler.supabase.com:5432/postgres
 ```
 
-## 2. SearXNG (global search)
-
-```env
-DISCOVERY_PROVIDERS=searxng
-SEARXNG_BASE_URL=http://<searxng-service>.railway.internal:8080
-DISCOVERY_CONCURRENCY=10
-PIPE_QUERIES=20
-PIPE_PER_QUERY=30
-```
-
-No seeds — discovery is 100% SearXNG web search scoped to **USA** (`PIPE_GEO=USA`, `SEARXNG_LANGUAGE=en-US`).
-
-## 3. Redis queue
-
-```env
-REDIS_URL=redis://...
-USE_FETCH_QUEUE=true
-SCANNER_MODE=full
-```
-
-## 4. Speed tuning
-
-```env
-FETCH_CONCURRENCY=100        # async HTTP, connection pool
-CRAWL_DOWNLOAD_DELAY_SECONDS=0
-HTTP_TIMEOUT_SECONDS=12
-FETCH_BATCH_SIZE=1000
-WORKER_MAX_ITEMS=500000
-```
-
-**Throughput** (async fetch, ~1.5s avg per site):
-
-| Sites | 1 worker @ 100 concurrency | 3 worker replicas |
-|-------|---------------------------|-------------------|
-| 100k | ~25 min | ~8 min |
-| 500k | ~2 h | ~40 min |
-| 1M | ~4 h | ~1.3 h |
-
-Previous ~14h was with concurrency=20 + 0.5s delay + sync threads.
-
-## 5. Cron 2×/day
-
-- `06:00 UTC` — `SCANNER_MODE=full` (discovery fills queue, worker drains)
-- `18:00 UTC` — same
-
-Or split:
-- Cron discovery only (`SCANNER_MODE=discovery`)
-- Always-on workers (`SCANNER_MODE=worker`, `WORKER_MAX_ITEMS=1000000`)
-
-## 6. Fetch method
-
-HTTPS GET + BeautifulSoup (no browser). Fast; JS-heavy sites may need Playwright later.
-
-## 7. Minimal prod env
-
-```env
-DISCOVERY_PROVIDERS=searxng
-SEARXNG_BASE_URL=http://searxng:8080
-REDIS_URL=redis://...
-USE_FETCH_QUEUE=true
-FETCH_CONCURRENCY=100
-WORKER_MAX_ITEMS=500000
-CRAWL_DOWNLOAD_DELAY_SECONDS=0
-```
+Use Supabase **Session pooler** (IPv4), not direct `db.*.supabase.co`.

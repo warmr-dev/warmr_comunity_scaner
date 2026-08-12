@@ -2,36 +2,36 @@
 
 Автоматический discovery + enrichment pipeline для professional communities (Warmr inventory).
 
-Документация: [`plan.md`](plan.md) · [`docs/supabase-brave-setup.md`](docs/supabase-brave-setup.md)
+Документация: [`plan.md`](plan.md) · [`docs/supabase-searxng-setup.md`](docs/supabase-searxng-setup.md)
 
 ## Быстрый старт
 
 ```bash
+docker compose up -d redis searxng
 pip install -e ".[dev]"
 copy .env.example .env
-# set BRAVE_SEARCH_API_KEY in .env
 
 community-scanner init-db
 community-scanner run --niche business --queries 5 --per-query 10 --max-fetch 20
 ```
 
-## Discovery: Brave Search
+## Discovery: SearXNG (бесплатный web search через Bing)
 
 ```env
-DISCOVERY_PROVIDERS=brave
-BRAVE_SEARCH_API_KEY=your_key_here
-BRAVE_COUNTRY=us
-BRAVE_SEARCH_LANG=en
-BRAVE_MAX_REQUESTS=200
+DISCOVERY_PROVIDERS=searxng
+SEARXNG_BASE_URL=http://127.0.0.1:8080
+SEARXNG_LANGUAGE=en-US
+DISCOVERY_CONCURRENCY=1
+CRAWL_DOWNLOAD_DELAY_SECONDS=0.6
 PIPE_NICHE=business
 PIPE_GEO=USA
-PIPE_QUERIES=20
+PIPE_QUERIES=50
 PIPE_PER_QUERY=25
 ```
 
-## Скорость fetch
+На Railway образ бандлит SearXNG (`BUNDLE_SEARXNG=true`) — отдельный сервис не обязателен.
 
-Async HTTP + connection pool. Ключевые переменные:
+## Скорость fetch
 
 ```env
 FETCH_CONCURRENCY=100
@@ -46,13 +46,13 @@ FETCH_BATCH_SIZE=1000
 | 500k | 2 ч |
 | 1M | 4 ч |
 
-Для 1M за ~1.5 ч: **3 worker-реплики** на Railway (`SCANNER_MODE=worker`).
+Для 1M за ~1.5 ч: **3 worker-реплики** + Redis (`USE_FETCH_QUEUE=true`, `SCANNER_MODE=worker`).
 
 ## Команды
 
 | Команда | Назначение |
 |---------|------------|
-| `discover` | Brave search → Redis queue |
+| `discover` | SearXNG search → Redis queue |
 | `worker` | Параллельный fetch из очереди |
 | `run` | Discovery + fetch без очереди |
 
