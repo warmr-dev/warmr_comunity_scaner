@@ -39,7 +39,8 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
 def _search_safe(provider: DiscoveryProvider, query: str, per_query: int) -> list[DiscoveryHit]:
     try:
         return provider.search(query, count=per_query)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        print(f"discovery error [{provider.name}] {exc!s}"[:240], flush=True)
         return []
 
 
@@ -94,19 +95,34 @@ def run_discovery(
         return hits
 
     workers = min(settings.discovery_concurrency, len(tasks))
+    total = len(tasks)
+    print(
+        f"discovery start providers={[p.name for p in search_providers]} "
+        f"queries={len(queries)} tasks={total} concurrency={workers}",
+        flush=True,
+    )
 
     # Sequential when concurrency=1 (recommended): one query at a time with pause.
     if workers <= 1:
-        for provider, query in tasks:
-            for hit in _search_safe(provider, query, per_query):
+        for i, (provider, query) in enumerate(tasks, start=1):
+            batch = _search_safe(provider, query, per_query)
+            for hit in batch:
                 if hit.url in seen_urls:
                     continue
                 seen_urls.add(hit.url)
                 hits.append(hit)
+            if i == 1 or i == total or i % 5 == 0:
+                print(
+                    f"discovery {i}/{total} [{provider.name}] hits=+{len(batch)} total={len(hits)} "
+                    f"q={query[:80]!r}",
+                    flush=True,
+                )
             if delay > 0:
                 time.sleep(delay)
+        print(f"discovery done hits={len(hits)}", flush=True)
         return hits
 
+    done = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {}
         for provider, query in tasks:
@@ -114,12 +130,22 @@ def run_discovery(
             if delay > 0:
                 time.sleep(delay / max(workers, 1))
         for future in as_completed(futures):
-            for hit in future.result():
+            provider, query = futures[future]
+            batch = future.result()
+            for hit in batch:
                 if hit.url in seen_urls:
                     continue
                 seen_urls.add(hit.url)
                 hits.append(hit)
+            done += 1
+            if done == 1 or done == total or done % 5 == 0:
+                print(
+                    f"discovery {done}/{total} [{provider.name}] hits=+{len(batch)} "
+                    f"total={len(hits)} q={query[:80]!r}",
+                    flush=True,
+                )
 
+    print(f"discovery done hits={len(hits)}", flush=True)
     return hits
 
 

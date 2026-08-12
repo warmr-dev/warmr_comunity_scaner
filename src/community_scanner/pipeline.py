@@ -612,11 +612,19 @@ def process_candidates_parallel(
     workers = concurrency if concurrency is not None else settings.fetch_concurrency
     batch = candidates[:limit]
     geo = scan_geo or settings.pipe_geo
-    return asyncio.run(
+    print(f"fetch start items={len(batch)} concurrency={workers}", flush=True)
+    outcomes = asyncio.run(
         _process_candidates_async(
             batch, settings, llm_on=llm_on, concurrency=workers, scan_geo=geo
         )
     )
+    print(
+        f"fetch done items={len(outcomes)} "
+        f"ok={sum(1 for o in outcomes if o.fetched)} "
+        f"err={sum(1 for o in outcomes if not o.fetched)}",
+        flush=True,
+    )
+    return outcomes
 
 
 def job_to_models(job: dict) -> tuple[DiscoveryHit, NormalizedUrl, str]:
@@ -700,7 +708,9 @@ def apply_serp_stubs(
     scan_geo: str,
     niche: str | None = None,
 ) -> None:
-    for hit, norm in candidates:
+    total = len(candidates)
+    print(f"serp stubs start candidates={total}", flush=True)
+    for idx, (hit, norm) in enumerate(candidates, start=1):
         # Harvest every invite found in URL + title + snippet (directories/lists).
         blob = " ".join(filter(None, [hit.url or "", hit.title or "", hit.snippet or ""]))
         invites = find_all_invites_in_text(blob)
@@ -709,6 +719,8 @@ def apply_serp_stubs(
             invites = [direct, *invites]
 
         if not invites:
+            if idx == 1 or idx == total or idx % 10 == 0:
+                print(f"serp stubs {idx}/{total} (no invites)", flush=True)
             continue
 
         for invite in invites:
@@ -733,10 +745,19 @@ def apply_serp_stubs(
             if item is None:
                 continue
             _upsert_invite_item(session, item, metrics)
+        if idx == 1 or idx == total or idx % 5 == 0:
+            print(
+                f"serp stubs {idx}/{total} invites={len(invites)} "
+                f"upserted_new={metrics.upserted_new}",
+                flush=True,
+            )
+    print(f"serp stubs done upserted_new={metrics.upserted_new}", flush=True)
 
 
 def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: PipelineMetrics) -> None:
-    for outcome in outcomes:
+    total = len(outcomes)
+    print(f"apply outcomes start items={total}", flush=True)
+    for idx, outcome in enumerate(outcomes, start=1):
         if outcome.fetched:
             metrics.fetched += 1
         else:
@@ -790,6 +811,17 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
                 metrics.skipped_junk += 1
                 continue
             _upsert_invite_item(session, expanded, metrics)
+        if idx == 1 or idx == total or idx % 10 == 0:
+            print(
+                f"apply outcomes {idx}/{total} "
+                f"upserted_new={metrics.upserted_new} skipped={metrics.skipped_junk}",
+                flush=True,
+            )
+    print(
+        f"apply outcomes done fetched={metrics.fetched} "
+        f"upserted_new={metrics.upserted_new} skipped={metrics.skipped_junk}",
+        flush=True,
+    )
 
 
 def discover_candidates(
@@ -922,11 +954,21 @@ def run_pipeline(
     run_id = _start_run(session)
 
     try:
+        print(
+            f"pipeline start niche={params.niche!r} geo={params.geo!r} "
+            f"queries={query_limit} per_query={per_query} max_fetch={max_fetch}",
+            flush=True,
+        )
         hits, key_by_url, unique_candidates, metrics = discover_candidates(
             settings,
             params,
             per_query=per_query,
             query_limit=query_limit,
+        )
+        print(
+            f"normalize done hits={len(hits)} unique={len(unique_candidates)} "
+            f"blocked={metrics.blocked}",
+            flush=True,
         )
         save_discovery_hits(session, hits, key_by_url)
 
@@ -942,6 +984,7 @@ def run_pipeline(
             niche=params.niche,
         )
         session.commit()
+        print("serp stubs committed", flush=True)
 
         inline = unique_candidates[:max_fetch]
         overflow = unique_candidates[max_fetch:]
@@ -963,6 +1006,7 @@ def run_pipeline(
             metrics.enqueued = enqueue_fetch_jobs(settings, jobs)
 
         _finalize_run(session, run_id, status="success", metrics=metrics)
+        print(f"pipeline done run_id={run_id} metrics={metrics.as_dict()}", flush=True)
         return PipelineResult(metrics=metrics, run_id=run_id)
     except Exception as exc:  # noqa: BLE001
         _finalize_run(session, run_id, status="error", metrics=metrics, error=str(exc))
