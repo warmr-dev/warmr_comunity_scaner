@@ -25,37 +25,28 @@ services:
       timeout: 3s
       retries: 10
 
-  searxng:
-    image: searxng/searxng:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/searxng:/etc/searxng:ro
-    environment:
-      SEARXNG_BASE_URL: http://localhost:8080/
-
   scanner:
     build: .
     depends_on:
       redis:
         condition: service_healthy
-      searxng:
-        condition: service_started
     environment:
       APP_ENV: local
       DATABASE_URL: sqlite:///./data/scanner.db
       REDIS_URL: redis://redis:6379/0
       USE_FETCH_QUEUE: "true"
-      DISCOVERY_PROVIDERS: searxng
-      SEARXNG_BASE_URL: http://searxng:8080
-      DISCOVERY_CONCURRENCY: 8
+      DISCOVERY_PROVIDERS: brave
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      BRAVE_COUNTRY: us
+      BRAVE_SEARCH_LANG: en
+      BRAVE_MAX_REQUESTS: 200
+      DISCOVERY_CONCURRENCY: 1
       SCANNER_MODE: full
       FETCH_CONCURRENCY: 50
       FETCH_BATCH_SIZE: 200
       WORKER_MAX_ITEMS: 1000
       PIPE_NICHE: business
       PIPE_GEO: USA
-      SEARXNG_LANGUAGE: en-US
       PIPE_QUERIES: 5
       PIPE_PER_QUERY: 15
     volumes:

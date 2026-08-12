@@ -1,3 +1,7 @@
+# ~~Production setup: SearXNG + Redis queue + Supabase~~ (deprecated)
+
+> **Deprecated.** SearXNG removed from the runtime. Use [`supabase-brave-setup.md`](supabase-brave-setup.md).
+
 # Production setup: SearXNG + Redis queue + Supabase
 
 ## Services on Railway

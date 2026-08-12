@@ -16,11 +16,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     use_fetch_queue: bool = False
 
-    searxng_base_url: str = "http://127.0.0.1:8080"
-    # Global web discovery via self-hosted SearXNG only.
-    discovery_providers: str = "searxng"
+    # Primary web search: brave. Also: directory, seeds.
+    discovery_providers: str = "brave"
     discovery_concurrency: int = Field(default=2, ge=1, le=50)
     brave_search_api_key: str = ""
+    brave_country: str = "us"
+    brave_search_lang: str = "en"
+    # Hard cap on Brave API calls per process ($5/1k → 200 ≈ $1). 0 = unlimited.
+    brave_max_requests: int = Field(default=0, ge=0, le=1_000_000)
 
     llm_enabled: bool = False
     openai_api_key: str = ""
@@ -45,7 +48,6 @@ class Settings(BaseSettings):
     pipe_language: str = "non-ru"
     pipe_niche: str = "business"
     pipe_audience: str = "professionals"
-    searxng_language: str = "en-US"
 
     @property
     def discovery_provider_list(self) -> list[str]:

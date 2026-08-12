@@ -6,7 +6,6 @@ from community_scanner.config import Settings
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams, generate_queries
 from community_scanner.discovery.brave import BraveSearchProvider
 from community_scanner.discovery.directory_crawler import DirectoryCrawlerProvider
-from community_scanner.discovery.searxng import SearxngProvider
 from community_scanner.discovery.seeds import SeedsProvider
 from community_scanner.models import DiscoveryHit
 
@@ -21,6 +20,9 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
                 BraveSearchProvider(
                     api_key=settings.brave_search_api_key,
                     timeout=settings.http_timeout_seconds,
+                    country=settings.brave_country,
+                    search_lang=settings.brave_search_lang,
+                    max_requests=settings.brave_max_requests,
                 )
             )
         elif name in ("directory", "directories"):
@@ -31,15 +33,6 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
                     max_channels_per_site=settings.directory_max_channels_per_site,
                 )
             )
-        elif name == "searxng":
-            if settings.searxng_base_url:
-                providers.append(
-                    SearxngProvider(
-                        base_url=settings.searxng_base_url,
-                        timeout=settings.http_timeout_seconds,
-                        language=settings.searxng_language,
-                    )
-                )
     return providers
 
 
@@ -71,7 +64,7 @@ def run_discovery(
     providers = build_providers(settings)
     if not providers:
         raise RuntimeError(
-            "No discovery providers configured. Set DISCOVERY_PROVIDERS=directory or searxng."
+            "No discovery providers configured. Set DISCOVERY_PROVIDERS=brave or directory."
         )
 
     hits: list[DiscoveryHit] = []
@@ -82,8 +75,6 @@ def run_discovery(
     search_providers = [p for p in providers if p not in crawl_providers]
 
     delay = max(0.0, settings.crawl_download_delay_seconds)
-    if "searxng" in settings.discovery_provider_list and delay <= 0:
-        delay = 0.6
 
     for provider in crawl_providers:
         for hit in _crawl_safe(provider, params, budget):

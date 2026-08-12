@@ -1,7 +1,5 @@
 # Production setup: Brave Search + Supabase (`community_scanner`)
 
-> **Deprecated:** use [`supabase-searxng-setup.md`](supabase-searxng-setup.md) — Brave заменён на SearXNG + Redis queue.
-
 Project ref: `bpxiawuzidhjalaemejy` (name: scanner)
 
 ## 1. Why Railway crashed
@@ -40,30 +38,25 @@ Option A — Supabase SQL Editor: paste `supabase/community_scanner.sql` and Run
 
 Option B — Railway will run `community-scanner init-db` on start (creates table if connection works).
 
-## 4. Discovery without Brave (current)
-
-Until you have a Brave key, use seeds:
-
-```env
-DISCOVERY_PROVIDERS=seeds
-BRAVE_SEARCH_API_KEY=
-```
-
-When you get a key later (https://brave.com/search/api/):
+## 4. Discovery: Brave only
 
 ```env
 DISCOVERY_PROVIDERS=brave
 BRAVE_SEARCH_API_KEY=your_key_here
+BRAVE_COUNTRY=us
+BRAVE_SEARCH_LANG=en
+BRAVE_MAX_REQUESTS=200
+DISCOVERY_CONCURRENCY=1
 ```
+
+Key: https://brave.com/search/api/
 
 ## 5. Other keys (optional)
 
 | Key | Needed? | Where |
 |-----|---------|--------|
-| `BRAVE_SEARCH_API_KEY` | Optional (later for web search) | brave.com/search/api |
+| `BRAVE_SEARCH_API_KEY` | Required for web search | brave.com/search/api |
 | `OPENAI_API_KEY` | Only if `LLM_ENABLED=true` | platform.openai.com |
-| `SEARXNG_BASE_URL` | No if Brave only | leave empty |
-| `WARMR_DATABASE_URL` | No if writing to Supabase via `DATABASE_URL` | leave empty |
 
 ## 6. Railway Variables (copy)
 
@@ -72,9 +65,12 @@ APP_ENV=production
 DATABASE_URL=postgresql+psycopg://postgres.bpxiawuzidhjalaemejy:YOUR_DB_PASSWORD@YOUR_POOLER_HOST:5432/postgres
 SCANNER_DATA_DIR=/app/data
 
-DISCOVERY_PROVIDERS=seeds
+DISCOVERY_PROVIDERS=brave
 BRAVE_SEARCH_API_KEY=
-SEARXNG_BASE_URL=
+BRAVE_COUNTRY=us
+BRAVE_SEARCH_LANG=en
+BRAVE_MAX_REQUESTS=200
+DISCOVERY_CONCURRENCY=1
 
 LLM_ENABLED=false
 OPENAI_API_KEY=
@@ -89,35 +85,14 @@ WARMR_UPSERT_KEY=canonical_key
 HTTP_TIMEOUT_SECONDS=20
 CRAWL_DOWNLOAD_DELAY_SECONDS=1.0
 
-PIPE_NICHE=accounting
-PIPE_GEO=Florida
-PIPE_QUERIES=5
-PIPE_PER_QUERY=10
-PIPE_MAX_FETCH=40
+PIPE_NICHES=software-engineering,education
+PIPE_GEO=USA
+PIPE_QUERIES=20
+PIPE_PER_QUERY=25
+PIPE_MAX_FETCH=100
+SCANNER_MODE=run
 ```
 
 ## 7. Redeploy and verify
 
-1. Push latest code (table `community_scanner`, discovery=`seeds`).  
-2. Set vars → Redeploy.  
-3. Logs should show `OK: tables created` then `run_id` metrics (`discovery_hits` > 0).  
-4. In Supabase → **Table Editor → community_scanner** — new rows.
-
-SQL check:
-
-```sql
-select count(*), max(last_seen_at) from community_scanner;
-select name, website, value_tier, access_status from community_scanner order by last_seen_at desc limit 20;
-```
-
-## 8. Flow
-
-```text
-Seeds (data/seeds.json + warmr gold etalons)
-  → normalize / dedupe
-  → fetch public pages
-  → classify
-  → upsert into Supabase public.community_scanner
-```
-
-Later with Brave: same pipeline, discovery from web search instead of seeds.
+Redeploy after setting vars. Check logs for Brave search hits and successful DB upserts.

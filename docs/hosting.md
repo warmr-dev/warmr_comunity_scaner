@@ -39,20 +39,19 @@ VPS не нужен специально под этот микросервис 
 
 | Job | Частота |
 |-----|---------|
-| Discovery (SearXNG global search) | **2× в день** (cron) |
+| Discovery (Brave Search) | **2× в день** (cron) |
 | Fetch worker (Redis queue) | в том же cron (`SCANNER_MODE=full`) или отдельный always-on worker |
 | Re-fetch Watch/medium | 1× в неделю (отдельный cron с `SCANNER_MODE=worker`) |
 | Sync в Warmr DB | после успешного classify |
 
-Тайминги и env: [`supabase-searxng-setup.md`](supabase-searxng-setup.md).
+Тайминги и env: [`supabase-brave-setup.md`](supabase-brave-setup.md).
 
 ## Минимальный prod-состав
 
-1. `scanner` — discovery + fetch worker (`SCANNER_MODE=full`)
+1. `scanner` — discovery + fetch (`SCANNER_MODE=run` или `full`)
 2. **Cron** — Railway scheduler 2×/день
 3. **Supabase Postgres** — `community_scanner`
-4. **Redis** — fetch queue (`USE_FETCH_QUEUE=true`)
-5. **SearXNG** — sidecar для бесплатного web discovery
+4. **Brave Search API key** — `BRAVE_SEARCH_API_KEY`
 
 ## Решение (зафиксировано командой)
 
