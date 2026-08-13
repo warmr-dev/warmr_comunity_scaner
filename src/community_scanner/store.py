@@ -49,11 +49,21 @@ def save_discovery_hits(session: Session, hits: list[DiscoveryHit], canonical_ke
     return len(rows)
 
 
+def _pending_community(session: Session, canonical_key: str) -> CommunityRow | None:
+    """Return an unflushed insert in this session (same transaction duplicate guard)."""
+    for obj in session.new:
+        if isinstance(obj, CommunityRow) and obj.canonical_key == canonical_key:
+            return obj
+    return None
+
+
 def upsert_community(session: Session, item: ExtractedCommunity) -> tuple[CommunityRow, bool, bool]:
     """Returns (row, created, changed)."""
-    existing = session.scalar(
-        select(CommunityRow).where(CommunityRow.canonical_key == item.canonical_key)
-    )
+    existing = _pending_community(session, item.canonical_key)
+    if existing is None:
+        existing = session.scalar(
+            select(CommunityRow).where(CommunityRow.canonical_key == item.canonical_key)
+        )
     now = datetime.now(timezone.utc)
 
     if existing is None:

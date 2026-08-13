@@ -94,10 +94,14 @@ def _http_get(url: str, *, timeout: float, delay: float) -> str | None:
         ) as client:
             resp = client.get(url)
             if resp.status_code >= 400:
+                print(
+                    f"directory fetch blocked url={url} status={resp.status_code}",
+                    flush=True,
+                )
                 return None
             return resp.text or ""
     except Exception as exc:  # noqa: BLE001
-        log.debug("directory fetch failed %s: %s", url, exc)
+        print(f"directory fetch failed url={url} err={exc}", flush=True)
         return None
 
 
@@ -170,6 +174,7 @@ def crawl_tgstat(
     for listing_url in listing_urls:
         html = _http_get(listing_url, timeout=timeout, delay=delay)
         if not html:
+            print(f"directory tgstat empty listing url={listing_url}", flush=True)
             continue
         for url in extract_tgstat_channel_urls(html):
             key = url.lower()
@@ -250,6 +255,7 @@ def crawl_disboard(
     for search_url in search_urls:
         html = _http_get(search_url, timeout=timeout, delay=delay)
         if not html:
+            print(f"directory disboard empty search url={search_url}", flush=True)
             continue
         for match in DISBOARD_SERVER_RE.finditer(html):
             path, title = match.group(1), match.group(2).strip()

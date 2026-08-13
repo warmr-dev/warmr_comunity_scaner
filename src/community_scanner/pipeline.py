@@ -20,7 +20,6 @@ from community_scanner.invites import (
     classify_invite_url,
     enrich_invite_page,
     find_all_invites_in_text,
-    find_invite_in_text,
     invite_from_platform_page,
     parse_member_count,
 )
@@ -108,22 +107,62 @@ def _validate_join_url(join_url: str, *, timeout_seconds: float = 8.0) -> tuple[
 
 def _invite_from_hit(hit: DiscoveryHit, norm: NormalizedUrl | None = None):
     """Prefer direct hit URL, then invite buried in title/snippet, then platform page."""
-    invite = classify_invite_url(hit.url or "")
-    if invite:
-        return invite, "hit_url"
-    blob = " ".join(filter(None, [hit.title or "", hit.snippet or "", hit.url or ""]))
-    invite = find_invite_in_text(blob)
-    if invite:
-        return invite, "serp_snippet"
-    if norm is not None:
-        invite = invite_from_platform_page(
+    invites = _invites_from_hit(hit, norm)
+    if invites:
+        source = "hit_url" if classify_invite_url(hit.url or "") else "serp_snippet"
+        if source == "serp_snippet" and norm is not None:
+            page = invite_from_platform_page(
+                norm.website,
+                getattr(norm.platform, "value", str(norm.platform)),
+                norm.platform_id,
+            )
+            if page and invites[0].url == page.url:
+                source = "platform_page"
+        return invites[0], source
+    return None, None
+
+
+def _invites_from_hit(hit: DiscoveryHit, norm: NormalizedUrl | None = None):
+    """Collect invite-shaped URLs from SERP metadata and platform pages."""
+    blob = " ".join(filter(None, [hit.url or "", hit.title or "", hit.snippet or ""]))
+    invites = find_all_invites_in_text(blob)
+    direct = classify_invite_url(hit.url or "")
+    if direct:
+        direct_key = direct.url.lower().rstrip("/")
+        if all(i.url.lower().rstrip("/") != direct_key for i in invites):
+            invites = [direct, *invites]
+
+    if not invites and norm is not None:
+        page_invite = invite_from_platform_page(
             norm.website,
             getattr(norm.platform, "value", str(norm.platform)),
             norm.platform_id,
         )
-        if invite:
-            return invite, "platform_page"
-    return None, None
+        if page_invite:
+            invites = [page_invite]
+    return invites
+
+
+def _expand_discovery_invite_hits(hits: list[DiscoveryHit]) -> list[DiscoveryHit]:
+    """Promote invite URLs found in SERP title/snippet to first-class discovery hits."""
+    seen: set[str] = {h.url.lower().rstrip("/") for h in hits if h.url}
+    expanded = list(hits)
+    for hit in hits:
+        for invite in _invites_from_hit(hit):
+            key = invite.url.lower().rstrip("/")
+            if key in seen:
+                continue
+            seen.add(key)
+            expanded.append(
+                DiscoveryHit(
+                    url=invite.url,
+                    title=hit.title,
+                    snippet=hit.snippet,
+                    provider=f"{hit.provider}-invite",
+                    query=hit.query,
+                )
+            )
+    return expanded
 
 
 DIRECTORY_HOST_HINTS = (
@@ -405,6 +444,8 @@ def _finalize_run(
                 session.rollback()
             except Exception:  # noqa: BLE001
                 pass
+            status = "error"
+            error = error or f"commit_failed: {exc}"
     else:
         try:
             session.rollback()
@@ -759,12 +800,7 @@ def apply_serp_stubs(
         flush=True,
     )
     for idx, (hit, norm) in enumerate(candidates, start=1):
-        # Harvest every invite found in URL + title + snippet (directories/lists).
-        blob = " ".join(filter(None, [hit.url or "", hit.title or "", hit.snippet or ""]))
-        invites = find_all_invites_in_text(blob)
-        direct = classify_invite_url(hit.url or "")
-        if direct and all(i.url != direct.url for i in invites):
-            invites = [direct, *invites]
+        invites = _invites_from_hit(hit, norm)
 
         if not invites:
             if idx == 1 or idx == total or idx % 10 == 0:
@@ -904,6 +940,14 @@ def discover_candidates(
 ) -> tuple[list, dict[str, str], list[tuple[DiscoveryHit, NormalizedUrl]], PipelineMetrics]:
     metrics = PipelineMetrics(queries_estimated=query_limit)
     hits = run_discovery(settings, params, per_query=per_query, query_limit=query_limit)
+    expanded = _expand_discovery_invite_hits(hits)
+    if len(expanded) > len(hits):
+        print(
+            f"discovery invite expansion +{len(expanded) - len(hits)} "
+            f"from_serp={len(hits)} total={len(expanded)}",
+            flush=True,
+        )
+    hits = expanded
     metrics.discovery_hits = len(hits)
 
     key_by_url: dict[str, str] = {}
