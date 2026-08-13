@@ -55,10 +55,42 @@ class QueryParams:
     community_type: str | None = None
 
 
-# Invite-first templates. Hard inurl/site operators first — Bing often returns
-# listicles for soft "telegram group" queries.
+# Phase 1: collect invite-shaped links only (filter later).
+HARVEST_TEMPLATES = [
+    "inurl:t.me/+",
+    "inurl:t.me/joinchat",
+    "inurl:chat.whatsapp.com",
+    "inurl:discord.gg",
+    "inurl:discord.com/invite",
+    "inurl:join.slack.com",
+    "inurl:slack.com/shared_invite",
+    "site:tgstat.com/en",
+    "site:disboard.org/server",
+    "site:discord.me",
+    "site:discordservers.com",
+    '"t.me/+" invite OR group OR join',
+    '"chat.whatsapp.com/" invite OR group',
+    '"discord.gg/" invite OR server',
+    '"join.slack.com/t/" invite OR workspace',
+    "telegram group invite link -bot",
+    "whatsapp group invite link",
+    "discord server invite link -bot",
+    "slack workspace invite link",
+    "community chat invite telegram OR discord OR whatsapp OR slack",
+]
+
+# Soft niche variants appended in harvest when a niche is set (directory/search mix).
+HARVEST_NICHE_TEMPLATES = [
+    'inurl:t.me/+ "{niche}"',
+    'inurl:discord.gg "{niche}"',
+    'inurl:chat.whatsapp.com "{niche}"',
+    'inurl:join.slack.com "{niche}"',
+    'site:tgstat.com/en "{niche}"',
+    'site:disboard.org "{niche}"',
+]
+
+# Niche-first templates (used when HARVEST_MODE=false).
 CHAT_TEMPLATES = [
-    # --- Direct invite URLs (highest yield) ---
     'inurl:t.me/+ "{niche}"',
     'inurl:t.me/joinchat "{niche}"',
     'inurl:chat.whatsapp.com "{niche}"',
@@ -71,13 +103,11 @@ CHAT_TEMPLATES = [
     '"{niche}" "chat.whatsapp.com/"',
     '"{niche}" "discord.gg/"',
     '"{niche}" "join.slack.com/t/"',
-    # --- Directories that expose real invites ---
     'site:tgstat.com/en "{niche}"',
     'site:tgstat.com "{niche}" telegram',
     'site:disboard.org/server "{niche}"',
     'site:discord.me "{niche}"',
     'site:discordservers.com "{niche}"',
-    # --- Soft fallbacks (lower priority) ---
     '"{niche}" telegram invite link -bot -channel',
     '"{niche}" whatsapp group invite link',
     '"{niche}" discord invite link -bot',
@@ -105,15 +135,44 @@ def niche_query_terms(niche: str) -> list[str]:
     return terms or [raw]
 
 
-def generate_queries(params: QueryParams, limit: int = 50) -> list[str]:
+def generate_queries(
+    params: QueryParams,
+    limit: int = 50,
+    *,
+    harvest: bool = False,
+) -> list[str]:
     niche = params.niche or "software-engineering"
     geo = resolve_geo(params.geo)
     audience = params.audience or "developers"
     community_type = params.community_type or "community"
-    niche_terms = niche_query_terms(niche)
+    niche_lc = niche.strip().lower()
+    niche_is_broad = niche_lc in {"", "harvest", "all", "any", "invites"}
 
     queries: list[str] = []
     seen: set[str] = set()
+
+    def _add(q: str) -> bool:
+        q = " ".join(q.split())
+        key = q.lower()
+        if not q or key in seen:
+            return len(queries) >= limit
+        seen.add(key)
+        queries.append(q)
+        return len(queries) >= limit
+
+    if harvest:
+        for template in HARVEST_TEMPLATES:
+            if _add(template):
+                return queries
+        if not niche_is_broad:
+            for term in niche_query_terms(niche)[:2]:
+                values = {"niche": term, "geo": geo, "audience": audience, "type": community_type}
+                for template in HARVEST_NICHE_TEMPLATES:
+                    if _add(template.format(**values)):
+                        return queries
+        return queries
+
+    niche_terms = niche_query_terms(niche)
     for term in niche_terms:
         values = {
             "niche": term,
@@ -122,13 +181,7 @@ def generate_queries(params: QueryParams, limit: int = 50) -> list[str]:
             "type": community_type,
         }
         for template in CHAT_TEMPLATES:
-            q = " ".join(template.format(**values).split())
-            key = q.lower()
-            if not q or key in seen:
-                continue
-            seen.add(key)
-            queries.append(q)
-            if len(queries) >= limit:
+            if _add(template.format(**values)):
                 return queries
     return queries
 

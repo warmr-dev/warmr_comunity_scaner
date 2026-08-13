@@ -22,6 +22,20 @@ def test_no_paid_dictionary_trap():
     assert not any(q.lower().startswith("professional ") for q in queries)
 
 
+def test_harvest_queries_are_invite_first():
+    queries = generate_queries(QueryParams(niche="harvest"), limit=20, harvest=True)
+    blob = " ".join(queries).lower()
+    assert "inurl:t.me/+" in blob or "t.me/+" in blob
+    assert "discord.gg" in blob or "discord.com/invite" in blob
+    assert "whatsapp" in blob or "chat.whatsapp" in blob
+
+
+def test_harvest_with_niche_appends_soft_variants():
+    queries = generate_queries(QueryParams(niche="devops"), limit=40, harvest=True)
+    assert any("devops" in q.lower() for q in queries)
+    assert any(q.startswith("inurl:") and "devops" not in q.lower() for q in queries)
+
+
 def test_resolve_geo_fallback():
     assert resolve_geo(None) == DEFAULT_SCAN_GEO
     assert resolve_geo("") == DEFAULT_SCAN_GEO

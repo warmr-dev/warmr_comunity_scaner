@@ -179,6 +179,7 @@ def _item_from_invite(
     name: str | None,
     source_queries: list[str],
     raw_signals: dict,
+    harvest: bool = False,
 ) -> ExtractedCommunity | None:
     invite = classify_invite_url(invite_url)
     if not invite:
@@ -193,6 +194,8 @@ def _item_from_invite(
         snippet=str(raw_signals.get("snippet") or raw_signals.get("directory_size_text") or ""),
     ):
         return None
+
+    flags: dict = {}
     if is_russian_community(
         name=name,
         url=invite.url,
@@ -200,7 +203,10 @@ def _item_from_invite(
         snippet=str(raw_signals.get("snippet") or raw_signals.get("directory_size_text") or ""),
         source_url=str(raw_signals.get("from_page") or raw_signals.get("hit_url") or ""),
     ):
-        return None
+        if not harvest:
+            return None
+        flags["maybe_russian"] = True
+
     return ExtractedCommunity(
         website=norm.website,
         canonical_key=norm.canonical_key,
@@ -217,6 +223,8 @@ def _item_from_invite(
         source_queries=source_queries,
         raw_signals={
             **raw_signals,
+            **flags,
+            "harvest": harvest,
             "join_url_source": {
                 "rule": invite.rule,
                 "platform": invite.platform,
@@ -231,6 +239,9 @@ def _upsert_invite_item(
     session: Session,
     item: ExtractedCommunity,
     metrics: PipelineMetrics,
+    *,
+    harvest: bool = False,
+    skip_enrich: bool = False,
 ) -> None:
     if not item.join_url:
         metrics.note_reject("missing_join_url")
@@ -244,16 +255,21 @@ def _upsert_invite_item(
         item.raw_signals = {**item.raw_signals, "reject_reason": "adult_content"}
         metrics.note_reject("adult_content")
         return
-    if is_russian_community(
+
+    russian = is_russian_community(
         name=item.name,
         url=item.join_url,
         platform_id=item.platform_id,
         snippet=str(item.raw_signals),
         source_url=str(item.raw_signals.get("from_page") or item.raw_signals.get("hit_url") or ""),
-    ):
+    )
+    if russian and not harvest:
         item.raw_signals = {**item.raw_signals, "reject_reason": "russian_content"}
         metrics.note_reject("russian_content")
         return
+    if russian and harvest:
+        item.raw_signals = {**item.raw_signals, "maybe_russian": True}
+
     invite = classify_invite_url(item.join_url)
     if not invite:
         item.raw_signals = {**item.raw_signals, "reject_reason": "not_invite_shape"}
@@ -261,76 +277,94 @@ def _upsert_invite_item(
         return
     item.join_url = invite.url
 
-    # Enrich from invite landing page (Telegram shows subscriber count publicly).
-    meta = enrich_invite_page(item.join_url)
-    item.raw_signals = {
-        **item.raw_signals,
-        "invite_page": {
-            "ok": meta.get("ok"),
-            "status_code": meta.get("status_code"),
-            "size_members": meta.get("size_members"),
-            "size_text": meta.get("size_text"),
-            "error": meta.get("error"),
-        },
-    }
-    if meta.get("name") and (
-        not item.name
-        or item.name.startswith("http")
-        or item.name == item.canonical_domain
-        or "list" in (item.name or "").lower()
-    ):
-        item.name = meta["name"]
-    if meta.get("size_members") is not None:
-        item.size_members = int(meta["size_members"])
-        item.size_text = meta.get("size_text") or item.size_text
-
-    if item.size_members is None:
-        for blob in (
-            item.raw_signals.get("directory_size_text"),
-            item.raw_signals.get("snippet"),
+    if not skip_enrich:
+        # Enrich from invite landing page (Telegram shows subscriber count publicly).
+        meta = enrich_invite_page(item.join_url)
+        item.raw_signals = {
+            **item.raw_signals,
+            "invite_page": {
+                "ok": meta.get("ok"),
+                "status_code": meta.get("status_code"),
+                "size_members": meta.get("size_members"),
+                "size_text": meta.get("size_text"),
+                "error": meta.get("error"),
+            },
+        }
+        if meta.get("name") and (
+            not item.name
+            or item.name.startswith("http")
+            or item.name == item.canonical_domain
+            or "list" in (item.name or "").lower()
         ):
-            if not blob:
-                continue
-            parsed, parsed_text = parse_member_count(str(blob))
-            if parsed is not None:
-                item.size_members = parsed
-                item.size_text = parsed_text or item.size_text
-                break
+            item.name = meta["name"]
+        if meta.get("size_members") is not None:
+            item.size_members = int(meta["size_members"])
+            item.size_text = meta.get("size_text") or item.size_text
 
-    platform_lc = (invite.platform or "").lower()
-    size_optional = platform_lc in SIZE_OPTIONAL_PLATFORMS
-    if item.size_members is not None and item.size_members < MIN_MEMBERS_FOR_UPSERT:
+        if item.size_members is None:
+            for blob in (
+                item.raw_signals.get("directory_size_text"),
+                item.raw_signals.get("snippet"),
+            ):
+                if not blob:
+                    continue
+                parsed, parsed_text = parse_member_count(str(blob))
+                if parsed is not None:
+                    item.size_members = parsed
+                    item.size_text = parsed_text or item.size_text
+                    break
+
+    if not harvest:
+        platform_lc = (invite.platform or "").lower()
+        size_optional = platform_lc in SIZE_OPTIONAL_PLATFORMS
+        if item.size_members is not None and item.size_members < MIN_MEMBERS_FOR_UPSERT:
+            item.raw_signals = {
+                **item.raw_signals,
+                "reject_reason": "too_small",
+                "min_members": MIN_MEMBERS_FOR_UPSERT,
+            }
+            metrics.note_reject("too_small")
+            return
+        if item.size_members is None and not size_optional:
+            item.raw_signals = {
+                **item.raw_signals,
+                "reject_reason": "too_small_or_unknown_size",
+                "min_members": MIN_MEMBERS_FOR_UPSERT,
+            }
+            metrics.note_reject("too_small_or_unknown_size")
+            return
+
+        ok, reason, details = _validate_join_url(item.join_url)
         item.raw_signals = {
             **item.raw_signals,
-            "reject_reason": "too_small",
-            "min_members": MIN_MEMBERS_FOR_UPSERT,
+            "join_url_validation": {"ok": ok, "reason": reason, "details": details},
         }
-        metrics.note_reject("too_small")
-        return
-    if item.size_members is None and not size_optional:
-        item.raw_signals = {
-            **item.raw_signals,
-            "reject_reason": "too_small_or_unknown_size",
-            "min_members": MIN_MEMBERS_FOR_UPSERT,
-        }
-        metrics.note_reject("too_small_or_unknown_size")
-        return
+        if not ok:
+            item.raw_signals = {**item.raw_signals, "reject_reason": f"join_invalid:{reason}"}
+            metrics.note_reject(f"join_invalid:{reason}")
+            return
 
-    ok, reason, details = _validate_join_url(item.join_url)
-    item.raw_signals = {
-        **item.raw_signals,
-        "join_url_validation": {"ok": ok, "reason": reason, "details": details},
-    }
-    if not ok:
-        item.raw_signals = {**item.raw_signals, "reject_reason": f"join_invalid:{reason}"}
-        metrics.note_reject(f"join_invalid:{reason}")
-        return
+        item = classify(item)
+        if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
+            item.raw_signals = {**item.raw_signals, "reject_reason": "classify_junk"}
+            metrics.note_reject("classify_junk")
+            return
+    else:
+        # Harvest: keep invite-shaped URLs; tag for later filtering.
+        item.raw_signals = {**item.raw_signals, "harvest": True}
+        if item.size_members is not None and item.size_members < MIN_MEMBERS_FOR_UPSERT:
+            item.raw_signals = {**item.raw_signals, "maybe_too_small": True}
+        item = classify(item)
+        if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
+            item.access_status = AccessStatus.WATCH
+            item.value_tier = ValueTier.LOW
+            item.value_score = max(item.value_score or 0, 20)
+            item.raw_signals = {
+                **item.raw_signals,
+                "harvest_kept": True,
+                "classify_would_reject": True,
+            }
 
-    item = classify(item)
-    if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
-        item.raw_signals = {**item.raw_signals, "reject_reason": "classify_junk"}
-        metrics.note_reject("classify_junk")
-        return
     _, created, changed = upsert_community(session, item)
     if created:
         metrics.upserted_new += 1
@@ -716,9 +750,14 @@ def apply_serp_stubs(
     *,
     scan_geo: str,
     niche: str | None = None,
+    harvest: bool = False,
+    skip_enrich: bool = False,
 ) -> None:
     total = len(candidates)
-    print(f"serp stubs start candidates={total}", flush=True)
+    print(
+        f"serp stubs start candidates={total} harvest={harvest} skip_enrich={skip_enrich}",
+        flush=True,
+    )
     for idx, (hit, norm) in enumerate(candidates, start=1):
         # Harvest every invite found in URL + title + snippet (directories/lists).
         blob = " ".join(filter(None, [hit.url or "", hit.title or "", hit.snippet or ""]))
@@ -750,10 +789,17 @@ def apply_serp_stubs(
                         else {}
                     ),
                 },
+                harvest=harvest,
             )
             if item is None:
                 continue
-            _upsert_invite_item(session, item, metrics)
+            _upsert_invite_item(
+                session,
+                item,
+                metrics,
+                harvest=harvest,
+                skip_enrich=skip_enrich,
+            )
         if idx == 1 or idx == total or idx % 5 == 0:
             print(
                 f"serp stubs {idx}/{total} invites={len(invites)} "
@@ -763,9 +809,16 @@ def apply_serp_stubs(
     print(f"serp stubs done upserted_new={metrics.upserted_new} rejects={metrics.reject_reasons}", flush=True)
 
 
-def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: PipelineMetrics) -> None:
+def apply_outcomes(
+    session: Session,
+    outcomes: list[ProcessOutcome],
+    metrics: PipelineMetrics,
+    *,
+    harvest: bool = False,
+    skip_enrich: bool = False,
+) -> None:
     total = len(outcomes)
-    print(f"apply outcomes start items={total}", flush=True)
+    print(f"apply outcomes start items={total} harvest={harvest}", flush=True)
     for idx, outcome in enumerate(outcomes, start=1):
         if outcome.fetched:
             metrics.fetched += 1
@@ -815,11 +868,18 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
                     "invite_rule": meta.get("rule"),
                     **{k: v for k, v in (item.raw_signals or {}).items() if k != "all_invites"},
                 },
+                harvest=harvest,
             )
             if expanded is None:
                 metrics.note_reject("invite_filtered")
                 continue
-            _upsert_invite_item(session, expanded, metrics)
+            _upsert_invite_item(
+                session,
+                expanded,
+                metrics,
+                harvest=harvest,
+                skip_enrich=skip_enrich,
+            )
         if idx == 1 or idx == total or idx % 10 == 0:
             print(
                 f"apply outcomes {idx}/{total} "
@@ -940,7 +1000,13 @@ def run_fetch_worker(
                 max_items=len(parallel_candidates),
                 scan_geo=scan_geo,
             )
-            apply_outcomes(session, outcomes, metrics)
+            apply_outcomes(
+                session,
+                outcomes,
+                metrics,
+                harvest=bool(settings.harvest_mode),
+                skip_enrich=bool(settings.harvest_mode and settings.harvest_skip_enrich),
+            )
             session.commit()
             processed += len(candidates)
 
@@ -967,7 +1033,8 @@ def run_pipeline(
     try:
         print(
             f"pipeline start niche={params.niche!r} geo={params.geo!r} "
-            f"queries={query_limit} per_query={per_query} max_fetch={max_fetch}",
+            f"harvest={settings.harvest_mode} queries={query_limit} "
+            f"per_query={per_query} max_fetch={max_fetch}",
             flush=True,
         )
         hits, key_by_url, unique_candidates, metrics = discover_candidates(
@@ -985,6 +1052,8 @@ def run_pipeline(
 
         llm_on = settings.llm_enabled if use_llm is None else use_llm
         scan_geo = resolve_geo(params.geo)
+        harvest = bool(settings.harvest_mode)
+        skip_enrich = bool(harvest and settings.harvest_skip_enrich)
 
         # Volume: write every unique SERP hit immediately, then enrich via fetch.
         apply_serp_stubs(
@@ -993,6 +1062,8 @@ def run_pipeline(
             metrics,
             scan_geo=scan_geo,
             niche=params.niche,
+            harvest=harvest,
+            skip_enrich=skip_enrich,
         )
         session.commit()
         print("serp stubs committed", flush=True)
@@ -1007,7 +1078,13 @@ def run_pipeline(
             max_items=max_fetch,
             scan_geo=scan_geo,
         )
-        apply_outcomes(session, outcomes, metrics)
+        apply_outcomes(
+            session,
+            outcomes,
+            metrics,
+            harvest=harvest,
+            skip_enrich=skip_enrich,
+        )
 
         if overflow and settings.use_fetch_queue:
             jobs = [

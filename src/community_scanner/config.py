@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     pipe_niche: str = "business"
     pipe_audience: str = "professionals"
     searxng_language: str = "en-US"
+    # Harvest-first: collect invite-shaped links broadly; filter later.
+    harvest_mode: bool = True
+    # Skip slow invite-page enrich during harvest (size/name filled later).
+    harvest_skip_enrich: bool = True
 
     @property
     def discovery_provider_list(self) -> list[str]:

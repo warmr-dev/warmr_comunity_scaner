@@ -13,7 +13,9 @@ Project ref: `bpxiawuzidhjalaemejy` (name: scanner)
 ## Core env
 
 ```env
-DISCOVERY_PROVIDERS=searxng
+DISCOVERY_PROVIDERS=directory,searxng
+HARVEST_MODE=true
+HARVEST_SKIP_ENRICH=true
 SEARXNG_BASE_URL=http://127.0.0.1:8080
 SEARXNG_LANGUAGE=en-US
 BUNDLE_SEARXNG=true
@@ -21,13 +23,15 @@ DISCOVERY_CONCURRENCY=1
 CRAWL_DOWNLOAD_DELAY_SECONDS=0.6
 
 PIPE_GEO=USA
-PIPE_NICHES=software-engineering,education
-PIPE_QUERIES=50
+PIPE_NICHES=programming,education,devops,cybersecurity,data-science,ai
+PIPE_QUERIES=40
 PIPE_PER_QUERY=25
 PIPE_MAX_FETCH=200
-NICHE_LOOPS=20
+NICHE_LOOPS=3
 SCANNER_MODE=run
 ```
+
+`HARVEST_MODE=true` stores invite-shaped URLs with minimal filtering (adult only). Niche/size/language filtering is deferred.
 
 ## High volume (many invites)
 

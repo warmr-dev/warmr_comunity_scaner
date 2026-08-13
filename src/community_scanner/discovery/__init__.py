@@ -106,7 +106,8 @@ def run_discovery(
     if not search_providers:
         return hits
 
-    queries = generate_queries(params, limit=query_limit)
+    harvest = bool(settings.harvest_mode)
+    queries = generate_queries(params, limit=query_limit, harvest=harvest)
     tasks: list[tuple[DiscoveryProvider, str]] = [
         (provider, query) for query in queries for provider in search_providers
     ]
@@ -117,7 +118,7 @@ def run_discovery(
     total = len(tasks)
     print(
         f"discovery start providers={[p.name for p in search_providers]} "
-        f"queries={len(queries)} tasks={total} concurrency={workers}",
+        f"harvest={harvest} queries={len(queries)} tasks={total} concurrency={workers}",
         flush=True,
     )
 
