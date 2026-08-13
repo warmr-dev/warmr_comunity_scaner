@@ -15,6 +15,7 @@ cd /app
 : "${PIPE_PER_QUERY:=25}"
 : "${PIPE_MAX_FETCH:=80}"
 : "${NICHE_LOOPS:=1}"
+: "${LOOP_PAUSE_SECONDS:=60}"
 
 resolve_niches() {
   if [ "$PIPE_NICHES" != "auto" ] && [ -n "$PIPE_NICHES" ]; then
@@ -50,7 +51,11 @@ MAX_FETCH_ARGS="${PIPE_MAX_FETCH}"
 WORKER_MAX_ITEMS_ARGS="${WORKER_MAX_ITEMS:-100000}"
 
 NICHE_COUNT=$(echo "$NICHES" | tr ',' '\n' | sed '/^\s*$/d' | wc -l | tr -d ' ')
-echo "USA niches queued: ${NICHE_COUNT} loops=${NICHE_LOOPS}"
+if [ "$NICHE_LOOPS" = "0" ]; then
+  echo "USA niches queued: ${NICHE_COUNT} loops=infinite (pause ${LOOP_PAUSE_SECONDS}s between cycles)"
+else
+  echo "USA niches queued: ${NICHE_COUNT} loops=${NICHE_LOOPS}"
+fi
 
 community-scanner init-db
 
@@ -90,9 +95,24 @@ run_all_niches() {
 case "$SCANNER_MODE" in
   discovery|run|full)
     loop=1
-    while [ "$loop" -le "$NICHE_LOOPS" ]; do
-      echo "=== niche loop ${loop}/${NICHE_LOOPS} ==="
+    while :; do
+      if [ "$NICHE_LOOPS" = "0" ]; then
+        echo "=== niche loop ${loop}/∞ ==="
+      else
+        if [ "$loop" -gt "$NICHE_LOOPS" ]; then
+          break
+        fi
+        echo "=== niche loop ${loop}/${NICHE_LOOPS} ==="
+      fi
       run_all_niches
+      if [ "$NICHE_LOOPS" != "0" ]; then
+        loop=$((loop + 1))
+        continue
+      fi
+      if [ "$LOOP_PAUSE_SECONDS" -gt 0 ]; then
+        echo "cycle ${loop} done; pause ${LOOP_PAUSE_SECONDS}s before next cycle"
+        sleep "$LOOP_PAUSE_SECONDS"
+      fi
       loop=$((loop + 1))
     done
     if [ "$SCANNER_MODE" = "full" ] && [ "$USE_FETCH_QUEUE" = "true" ]; then

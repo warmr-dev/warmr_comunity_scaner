@@ -13,7 +13,7 @@ Project ref: `bpxiawuzidhjalaemejy` (name: scanner)
 ## Core env
 
 ```env
-DISCOVERY_PROVIDERS=directory,searxng
+DISCOVERY_PROVIDERS=searxng
 HARVEST_MODE=true
 HARVEST_SKIP_ENRICH=true
 SEARXNG_BASE_URL=http://127.0.0.1:8080
@@ -27,16 +27,23 @@ PIPE_NICHES=programming,education,devops,cybersecurity,data-science,ai
 PIPE_QUERIES=40
 PIPE_PER_QUERY=25
 PIPE_MAX_FETCH=200
-NICHE_LOOPS=3
+NICHE_LOOPS=0
+LOOP_PAUSE_SECONDS=120
 SCANNER_MODE=run
 ```
 
 `HARVEST_MODE=true` stores invite-shaped URLs with minimal filtering (adult only). Niche/size/language filtering is deferred.
 
+## 24/7 continuous harvest
+
+Set `NICHE_LOOPS=0` to run forever. The entrypoint cycles through all `PIPE_NICHES`, then sleeps `LOOP_PAUSE_SECONDS` (default 60) and starts again. Logs show `niche loop N/∞`.
+
+Use `DISCOVERY_PROVIDERS=searxng` only — tgstat/disboard return HTTP 403 from Railway datacenter IPs.
+
 ## High volume (many invites)
 
 1. Keep `DISCOVERY_CONCURRENCY=1` and delay ≥0.5s — Bing bans faster bursts from Railway IPs.
-2. Raise volume via **more niches + NICHE_LOOPS**, not concurrency.
+2. Raise volume via **more niches + infinite loops (`NICHE_LOOPS=0`)**, not concurrency.
 3. For 100k–1M **fetch**, split:
    - discovery cron (`SCANNER_MODE=discovery` / `run`)
    - Redis + 2–3 workers (`USE_FETCH_QUEUE=true`, `SCANNER_MODE=worker`, `FETCH_CONCURRENCY=100`)
