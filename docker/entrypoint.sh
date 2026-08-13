@@ -4,7 +4,7 @@ set -eu
 cd /app
 
 : "${SCANNER_MODE:=run}"
-: "${DISCOVERY_PROVIDERS:=searxng}"
+: "${DISCOVERY_PROVIDERS:=directory,searxng}"
 : "${SYNC_VALUE_TIERS:=high,medium,low}"
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"

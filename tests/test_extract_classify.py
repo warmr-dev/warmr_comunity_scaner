@@ -109,7 +109,8 @@ def test_classify_rejects_small_invite():
     assert out.value_tier == ValueTier.JUNK
 
 
-def test_classify_rejects_unknown_size_invite():
+def test_classify_keeps_telegram_without_size():
+    """Volume mode: Telegram/Discord invites OK without public member count."""
     from community_scanner.models import ExtractedCommunity, Platform
 
     item = ExtractedCommunity(
@@ -124,8 +125,27 @@ def test_classify_rejects_unknown_size_invite():
         access_status=AccessStatus.JOIN,
     )
     out = classify(item)
+    assert out.access_status != AccessStatus.REJECT
+    assert out.value_tier != ValueTier.JUNK
+
+
+def test_classify_rejects_known_too_small_invite():
+    from community_scanner.models import ExtractedCommunity, Platform
+
+    item = ExtractedCommunity(
+        website="https://t.me/tiny",
+        canonical_key="telegram:tiny",
+        canonical_domain="t.me",
+        platform=Platform.TELEGRAM,
+        platform_id="tiny",
+        name="Tiny",
+        join_url="https://t.me/tiny",
+        size_members=12,
+        access_status=AccessStatus.JOIN,
+    )
+    out = classify(item)
     assert out.access_status == AccessStatus.REJECT
-    assert out.raw_signals.get("reject_reason") == "unknown_size"
+    assert out.raw_signals.get("reject_reason") == "too_small"
 
 
 def test_classify_keeps_whatsapp_without_size():

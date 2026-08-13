@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, unquote
 
 # Telegram + WhatsApp + Slack + Discord invite URL patterns.
 _SLACK_SHARED = re.compile(
@@ -57,10 +57,11 @@ _TELEGRAM_BLOCKED = {
     "developers",
 }
 
-# Require proven audience before upsert (Telegram shows counts; Slack/WA often unknown).
+# Require proven audience before upsert when count is known.
 MIN_MEMBERS_FOR_UPSERT = 100
-# Platforms that rarely expose public member counts — allow upsert without size.
-SIZE_OPTIONAL_PLATFORMS = frozenset({"whatsapp", "slack"})
+# Datacenter IPs often cannot scrape invite landing pages for public counts.
+# Allow shaped invites without size; still reject known-too-small.
+SIZE_OPTIONAL_PLATFORMS = frozenset({"whatsapp", "slack", "telegram", "discord"})
 INVITE_SCAN_LIMIT = 500
 
 
@@ -89,7 +90,9 @@ def _normalize_candidate(url: str) -> str | None:
 
 def classify_invite_url(url: str) -> InviteMatch | None:
     """Return InviteMatch for Telegram / WhatsApp / Slack / Discord join links."""
-    url = _normalize_candidate(url)
+    from urllib.parse import unquote
+
+    url = _normalize_candidate(unquote((url or "").replace("%2B", "+").replace("%2b", "+")))
     if not url:
         return None
     if _BARE_SLACK.match(url):
@@ -160,6 +163,11 @@ def find_all_invites_in_text(text: str, *, limit: int = INVITE_SCAN_LIMIT) -> li
     """Collect unique chat invites from free text / HTML."""
     if not text:
         return []
+    text = (
+        unquote(text.replace("&amp;", "&").replace("&#x2F;", "/").replace("&#47;", "/"))
+        .replace("%2B", "+")
+        .replace("%2b", "+")
+    )
     patterns = (
         _SLACK_JOIN,
         _SLACK_SHARED,

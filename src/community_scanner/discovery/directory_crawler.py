@@ -456,6 +456,11 @@ class DirectoryCrawlerProvider(DiscoveryProvider):
             if len(filtered) >= count:
                 break
 
+        print(
+            f"directory niche={niche!r} raw={len(all_entries)} kept={len(filtered)} "
+            f"sites={','.join(self.sites)}",
+            flush=True,
+        )
         return entries_to_hits(filtered, niche=niche, provider=self.name)
 
     def search(self, query: str, count: int = 10) -> list[DiscoveryHit]:

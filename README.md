@@ -18,18 +18,19 @@ community-scanner run --niche business --queries 5 --per-query 10 --max-fetch 20
 ## Discovery: SearXNG (бесплатный web search через Bing)
 
 ```env
-DISCOVERY_PROVIDERS=searxng
+DISCOVERY_PROVIDERS=directory,searxng
 SEARXNG_BASE_URL=http://127.0.0.1:8080
 SEARXNG_LANGUAGE=en-US
 DISCOVERY_CONCURRENCY=1
 CRAWL_DOWNLOAD_DELAY_SECONDS=0.6
+DIRECTORY_MAX_CHANNELS_PER_SITE=40
 PIPE_NICHE=business
 PIPE_GEO=USA
-PIPE_QUERIES=50
+PIPE_QUERIES=40
 PIPE_PER_QUERY=25
 ```
 
-На Railway образ бандлит SearXNG (`BUNDLE_SEARXNG=true`) — отдельный сервис не обязателен.
+На Railway образ бандлит SearXNG (`BUNDLE_SEARXNG=true`). Directory crawler (tgstat/disboard) даёт прямые invite URL со size.
 
 ## Скорость fetch
 

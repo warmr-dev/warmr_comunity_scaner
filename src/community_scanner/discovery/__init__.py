@@ -90,11 +90,18 @@ def run_discovery(
         delay = 0.6
 
     for provider in crawl_providers:
+        print(f"directory crawl start [{provider.name}] budget={budget}", flush=True)
+        crawled = 0
         for hit in _crawl_safe(provider, params, budget):
+            crawled += 1
             if hit.url in seen_urls:
                 continue
             seen_urls.add(hit.url)
             hits.append(hit)
+        print(
+            f"directory crawl done [{provider.name}] raw={crawled} unique_total={len(hits)}",
+            flush=True,
+        )
 
     if not search_providers:
         return hits

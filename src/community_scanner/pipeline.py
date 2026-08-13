@@ -233,7 +233,7 @@ def _upsert_invite_item(
     metrics: PipelineMetrics,
 ) -> None:
     if not item.join_url:
-        metrics.skipped_junk += 1
+        metrics.note_reject("missing_join_url")
         return
     if is_adult_community(
         name=item.name,
@@ -241,8 +241,8 @@ def _upsert_invite_item(
         platform_id=item.platform_id,
         snippet=str(item.raw_signals),
     ):
-        metrics.skipped_junk += 1
         item.raw_signals = {**item.raw_signals, "reject_reason": "adult_content"}
+        metrics.note_reject("adult_content")
         return
     if is_russian_community(
         name=item.name,
@@ -251,12 +251,13 @@ def _upsert_invite_item(
         snippet=str(item.raw_signals),
         source_url=str(item.raw_signals.get("from_page") or item.raw_signals.get("hit_url") or ""),
     ):
-        metrics.skipped_junk += 1
         item.raw_signals = {**item.raw_signals, "reject_reason": "russian_content"}
+        metrics.note_reject("russian_content")
         return
     invite = classify_invite_url(item.join_url)
     if not invite:
-        metrics.skipped_junk += 1
+        item.raw_signals = {**item.raw_signals, "reject_reason": "not_invite_shape"}
+        metrics.note_reject("not_invite_shape")
         return
     item.join_url = invite.url
 
@@ -299,20 +300,20 @@ def _upsert_invite_item(
     platform_lc = (invite.platform or "").lower()
     size_optional = platform_lc in SIZE_OPTIONAL_PLATFORMS
     if item.size_members is not None and item.size_members < MIN_MEMBERS_FOR_UPSERT:
-        metrics.skipped_junk += 1
         item.raw_signals = {
             **item.raw_signals,
             "reject_reason": "too_small",
             "min_members": MIN_MEMBERS_FOR_UPSERT,
         }
+        metrics.note_reject("too_small")
         return
     if item.size_members is None and not size_optional:
-        metrics.skipped_junk += 1
         item.raw_signals = {
             **item.raw_signals,
             "reject_reason": "too_small_or_unknown_size",
             "min_members": MIN_MEMBERS_FOR_UPSERT,
         }
+        metrics.note_reject("too_small_or_unknown_size")
         return
 
     ok, reason, details = _validate_join_url(item.join_url)
@@ -321,12 +322,14 @@ def _upsert_invite_item(
         "join_url_validation": {"ok": ok, "reason": reason, "details": details},
     }
     if not ok:
-        metrics.skipped_junk += 1
+        item.raw_signals = {**item.raw_signals, "reject_reason": f"join_invalid:{reason}"}
+        metrics.note_reject(f"join_invalid:{reason}")
         return
 
     item = classify(item)
     if item.access_status == AccessStatus.REJECT or item.value_tier == ValueTier.JUNK:
-        metrics.skipped_junk += 1
+        item.raw_signals = {**item.raw_signals, "reject_reason": "classify_junk"}
+        metrics.note_reject("classify_junk")
         return
     _, created, changed = upsert_community(session, item)
     if created:
@@ -431,9 +434,15 @@ class PipelineMetrics:
     skipped_junk: int = 0
     llm_calls: int = 0
     enqueued: int = 0
+    reject_reasons: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return self.__dict__.copy()
+
+    def note_reject(self, reason: str) -> None:
+        key = reason or "unknown"
+        self.reject_reasons[key] = int(self.reject_reasons.get(key, 0)) + 1
+        self.skipped_junk += 1
 
 
 @dataclass
@@ -751,7 +760,7 @@ def apply_serp_stubs(
                 f"upserted_new={metrics.upserted_new}",
                 flush=True,
             )
-    print(f"serp stubs done upserted_new={metrics.upserted_new}", flush=True)
+    print(f"serp stubs done upserted_new={metrics.upserted_new} rejects={metrics.reject_reasons}", flush=True)
 
 
 def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: PipelineMetrics) -> None:
@@ -783,7 +792,7 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
             unique_urls.append(url)
 
         if not unique_urls:
-            metrics.skipped_junk += 1
+            metrics.note_reject("no_invite_on_page")
             continue
 
         invite_meta = {
@@ -808,18 +817,20 @@ def apply_outcomes(session: Session, outcomes: list[ProcessOutcome], metrics: Pi
                 },
             )
             if expanded is None:
-                metrics.skipped_junk += 1
+                metrics.note_reject("invite_filtered")
                 continue
             _upsert_invite_item(session, expanded, metrics)
         if idx == 1 or idx == total or idx % 10 == 0:
             print(
                 f"apply outcomes {idx}/{total} "
-                f"upserted_new={metrics.upserted_new} skipped={metrics.skipped_junk}",
+                f"upserted_new={metrics.upserted_new} skipped={metrics.skipped_junk} "
+                f"rejects={metrics.reject_reasons}",
                 flush=True,
             )
     print(
         f"apply outcomes done fetched={metrics.fetched} "
-        f"upserted_new={metrics.upserted_new} skipped={metrics.skipped_junk}",
+        f"upserted_new={metrics.upserted_new} skipped={metrics.skipped_junk} "
+        f"rejects={metrics.reject_reasons}",
         flush=True,
     )
 

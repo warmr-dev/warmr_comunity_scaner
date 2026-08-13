@@ -41,7 +41,7 @@ ENV SCANNER_DATA_DIR=/app/data \
     SEARXNG_PORT=8080 \
     USE_FETCH_QUEUE=false \
     SCANNER_MODE=run \
-    DISCOVERY_PROVIDERS=searxng \
+    DISCOVERY_PROVIDERS=directory,searxng \
     PYTHONPATH=/opt/searxng
 
 RUN chmod +x /app/docker/entrypoint.sh /app/docker/entrypoint-all-in-one.sh

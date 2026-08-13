@@ -30,6 +30,22 @@ IT_NICHES = (
     "bootcamp",
 )
 
+# Human-readable variants that Bing matches better than hyphenated slugs.
+NICHE_QUERY_ALIASES: dict[str, tuple[str, ...]] = {
+    "software-engineering": ("software engineering", "software engineer", "programming"),
+    "data-science": ("data science", "data scientist", "python"),
+    "machine-learning": ("machine learning", "ml engineer", "deep learning"),
+    "artificial-intelligence": ("artificial intelligence", "ai engineer", "ai"),
+    "cloud-computing": ("cloud computing", "aws", "devops"),
+    "web-development": ("web development", "web developer", "javascript"),
+    "mobile-development": ("mobile development", "android developer", "ios developer"),
+    "computer-science": ("computer science", "cs student", "programming"),
+    "cybersecurity": ("cyber security", "infosec", "cybersecurity"),
+    "data-engineering": ("data engineering", "data engineer"),
+    "online-learning": ("online learning", "study group", "bootcamp"),
+    "edtech": ("edtech", "education technology", "learning"),
+}
+
 
 @dataclass(frozen=True)
 class QueryParams:
@@ -39,56 +55,37 @@ class QueryParams:
     community_type: str | None = None
 
 
-# Queries focused on human chat groups/communities (not bots).
-# Telegram: groups and supergroups only (t.me/+ = invite links to groups, not channels/bots).
-# WhatsApp: group chats via chat.whatsapp.com.
-# Slack: workspaces via join.slack.com or shared_invite.
-# Discord: servers via disboard.org, discord.me, discord.gg (exclude bot-listing top.gg).
+# Invite-first templates. Hard inurl/site operators first — Bing often returns
+# listicles for soft "telegram group" queries.
 CHAT_TEMPLATES = [
-    # --- Telegram groups (invite links = groups/supergroups, not bots) ---
+    # --- Direct invite URLs (highest yield) ---
     'inurl:t.me/+ "{niche}"',
-    '"{niche}" site:t.me/+',
-    '"{niche}" telegram group -bot',
-    '"{niche}" telegram supergroup -bot',
-    '"{niche}" telegram community group',
-    "{niche} telegram group invite link",
-    "{niche} telegram study group",
-    "{niche} telegram learning group",
-    "join {niche} telegram group",
-    "best {niche} telegram groups",
-    "{audience} {niche} telegram group",
-    # --- Telegram directories (group-focused) ---
-    'site:tgstat.com "{niche}" -bot',
-    'site:telemetr.io "{niche}" -bot',
-    # --- WhatsApp group chats ---
+    'inurl:t.me/joinchat "{niche}"',
     'inurl:chat.whatsapp.com "{niche}"',
-    '"{niche}" chat.whatsapp.com',
-    '"{niche}" whatsapp group invite',
-    "{niche} whatsapp group link",
-    "join {niche} whatsapp group",
-    "{niche} whatsapp study group",
-    "{audience} {niche} whatsapp group",
-    # --- Slack workspaces ---
-    'inurl:join.slack.com "{niche}"',
-    'inurl:slack.com/shared_invite "{niche}"',
-    '"{niche}" join.slack.com',
-    "{niche} slack workspace invite",
-    "{niche} slack community workspace",
-    "{audience} {niche} slack",
-    # --- Discord servers (not bot lists) ---
-    'site:disboard.org "{niche}"',
-    'site:discord.me "{niche}"',
     'inurl:discord.gg "{niche}"',
     'inurl:discord.com/invite "{niche}"',
-    '"{niche}" discord server invite -bot',
-    "{niche} discord server community",
-    "{niche} discord learning server",
-    "{audience} {niche} discord server",
-    # --- Cross-platform community lists ---
-    '"{niche}" community telegram OR slack OR discord -bot',
-    "{niche} online community chat group",
-    "{niche} developer community chat",
-    "{niche} study group telegram OR discord OR slack",
+    'inurl:join.slack.com "{niche}"',
+    'inurl:slack.com/shared_invite "{niche}"',
+    'site:t.me "+{niche}"',
+    '"{niche}" "t.me/+"',
+    '"{niche}" "chat.whatsapp.com/"',
+    '"{niche}" "discord.gg/"',
+    '"{niche}" "join.slack.com/t/"',
+    # --- Directories that expose real invites ---
+    'site:tgstat.com/en "{niche}"',
+    'site:tgstat.com "{niche}" telegram',
+    'site:disboard.org/server "{niche}"',
+    'site:discord.me "{niche}"',
+    'site:discordservers.com "{niche}"',
+    # --- Soft fallbacks (lower priority) ---
+    '"{niche}" telegram invite link -bot -channel',
+    '"{niche}" whatsapp group invite link',
+    '"{niche}" discord invite link -bot',
+    '"{niche}" slack invite link workspace',
+    "join {niche} telegram group invite",
+    "join {niche} discord server invite",
+    "{audience} {niche} telegram group invite",
+    "{audience} {niche} discord invite",
 ]
 
 
@@ -97,26 +94,42 @@ def resolve_geo(geo: str | None) -> str:
     return value or DEFAULT_SCAN_GEO
 
 
+def niche_query_terms(niche: str) -> list[str]:
+    raw = (niche or "software-engineering").strip()
+    spaced = raw.replace("-", " ").replace("_", " ").strip()
+    terms: list[str] = []
+    for term in (raw, spaced, *NICHE_QUERY_ALIASES.get(raw.lower(), ())):
+        t = " ".join(term.split())
+        if t and t.lower() not in {x.lower() for x in terms}:
+            terms.append(t)
+    return terms or [raw]
+
+
 def generate_queries(params: QueryParams, limit: int = 50) -> list[str]:
     niche = params.niche or "software-engineering"
     geo = resolve_geo(params.geo)
     audience = params.audience or "developers"
     community_type = params.community_type or "community"
-
-    values = {
-        "niche": niche,
-        "geo": geo,
-        "audience": audience,
-        "type": community_type,
-    }
+    niche_terms = niche_query_terms(niche)
 
     queries: list[str] = []
-    for template in CHAT_TEMPLATES:
-        q = " ".join(template.format(**values).split())
-        if q and q not in queries:
+    seen: set[str] = set()
+    for term in niche_terms:
+        values = {
+            "niche": term,
+            "geo": geo,
+            "audience": audience,
+            "type": community_type,
+        }
+        for template in CHAT_TEMPLATES:
+            q = " ".join(template.format(**values).split())
+            key = q.lower()
+            if not q or key in seen:
+                continue
+            seen.add(key)
             queries.append(q)
-        if len(queries) >= limit:
-            break
+            if len(queries) >= limit:
+                return queries
     return queries
 
 

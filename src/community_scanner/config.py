@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     use_fetch_queue: bool = False
 
     searxng_base_url: str = "http://127.0.0.1:8080"
-    # Primary: searxng. Optional: directory, seeds, brave.
-    discovery_providers: str = "searxng"
+    # Primary: directory catalogs + searxng web search.
+    discovery_providers: str = "directory,searxng"
     discovery_concurrency: int = Field(default=2, ge=1, le=50)
     brave_search_api_key: str = ""
     brave_country: str = "us"

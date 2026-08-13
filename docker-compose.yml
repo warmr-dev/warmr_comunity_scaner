@@ -46,9 +46,10 @@ services:
       DATABASE_URL: sqlite:///./data/scanner.db
       REDIS_URL: redis://redis:6379/0
       USE_FETCH_QUEUE: "true"
-      DISCOVERY_PROVIDERS: searxng
+      DISCOVERY_PROVIDERS: directory,searxng
       SEARXNG_BASE_URL: http://searxng:8080
-      DISCOVERY_CONCURRENCY: 8
+      DISCOVERY_CONCURRENCY: 1
+      DIRECTORY_MAX_CHANNELS_PER_SITE: 40
       SCANNER_MODE: full
       FETCH_CONCURRENCY: 50
       FETCH_BATCH_SIZE: 200
@@ -58,6 +59,7 @@ services:
       SEARXNG_LANGUAGE: en-US
       PIPE_QUERIES: 5
       PIPE_PER_QUERY: 15
+      CRAWL_DOWNLOAD_DELAY_SECONDS: "0.6"
     volumes:
       - ./data:/app/data
 
