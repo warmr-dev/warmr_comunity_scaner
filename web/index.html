@@ -15,10 +15,11 @@
     .platforms { display:flex; flex-direction:column; gap:7px; margin-top:14px; } .platforms button { text-align:left; background:#172342; font-weight:500; } .platforms button.active { background:var(--accent); }
     .table-wrap { overflow:auto; } table { width:100%; border-collapse:collapse; min-width:850px; } th,td { text-align:left; padding:13px 10px; border-bottom:1px solid var(--line); vertical-align:top; } th { color:var(--muted); font-size:11px; text-transform:uppercase; }
     a { color:#b6adff; text-decoration:none; } a:hover { text-decoration:underline; } .badge { display:inline-block; padding:4px 8px; border-radius:999px; background:#25345a; font-size:12px; } .high { color:var(--green); background:#123d38; } .empty { text-align:center; padding:40px; color:var(--muted); }
-    .footer { display:flex; justify-content:space-between; align-items:center; margin-top:16px; } @media(max-width:800px){ .cards{grid-template-columns:repeat(2,1fr)} .layout{grid-template-columns:1fr} header{display:block} header button{margin-top:14px} }
+    .footer { display:flex; justify-content:space-between; align-items:center; margin-top:16px; } body:not(.authenticated) main { display:none; } .login { min-height:100vh; display:grid; place-items:center; padding:24px; } body.authenticated .login { display:none; } .login-card { width:min(400px,100%); background:rgba(19,27,49,.96); border:1px solid var(--line); border-radius:16px; padding:28px; box-shadow:0 20px 60px #05091488; } .login-card h1 { font-size:24px; margin-bottom:8px; } .login-card form { display:grid; gap:12px; margin-top:22px; } .login-card input { width:100%; } .error { color:#ff8f9d; min-height:20px; } @media(max-width:800px){ .cards{grid-template-columns:repeat(2,1fr)} .layout{grid-template-columns:1fr} header{display:block} header button{margin-top:14px} }
   </style>
 </head>
 <body>
+<section class="login"><div class="login-card"><h1>Community Scanner</h1><div class="sub">Sign in to view communities</div><form onsubmit="login(event)"><input id="email" type="email" autocomplete="username" placeholder="Email" required><input id="password" type="password" autocomplete="current-password" placeholder="Password" required><div class="error" id="loginError"></div><button type="submit">Sign in</button></form></div></section>
 <main class="wrap">
   <header><div><h1>Community Scanner</h1><div class="sub">Live read-only view of community_scanner</div></div><button onclick="loadAll()">Refresh data</button></header>
   <section class="cards">
@@ -54,7 +55,9 @@
   }
   function choosePlatform(value) { selectedPlatform=value; offset=0; loadAll(); } function page(delta) { offset=Math.max(0,offset + delta*50); loadCommunities(); }
   function debouncedLoad() { clearTimeout(timer); timer=setTimeout(() => { offset=0; loadCommunities(); }, 250); } async function loadAll() { try { await loadStats(); await loadCommunities(); } catch (error) { document.querySelector("#rows").innerHTML=`<tr><td class="empty" colspan="7">Could not connect to the database API</td></tr>`; } }
-  loadAll();
+  async function login(event) { event.preventDefault(); const response = await fetch("/api/auth", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email:document.querySelector("#email").value,password:document.querySelector("#password").value})}); if (!response.ok) { document.querySelector("#loginError").textContent = "Invalid email or password"; return; } document.body.classList.add("authenticated"); loadAll(); }
+  async function startApp() { const response = await fetch("/api/auth"); const data = await response.json(); if (data.authenticated) { document.body.classList.add("authenticated"); loadAll(); } }
+  startApp();
 </script>
 </body>
 </html>
