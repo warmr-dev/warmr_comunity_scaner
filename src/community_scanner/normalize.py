@@ -61,7 +61,99 @@ PLATFORM_HOSTS: dict[str, Platform] = {
     "mightynetworks.com": Platform.MIGHTY,
     "facebook.com": Platform.FACEBOOK,
     "linkedin.com": Platform.LINKEDIN,
+    "reddit.com": Platform.REDDIT,
+    "old.reddit.com": Platform.REDDIT,
+    "discourse.org": Platform.DISCOURSE,
+    "matrixrooms.info": Platform.MATRIX,
+    "matrix.to": Platform.MATRIX,
+    "geneva.com": Platform.GENEVA,
+    "mattermost.com": Platform.MATTERMOST,
+    "zulipchat.com": Platform.ZULIP,
+    "zulip.com": Platform.ZULIP,
+    "github.com": Platform.GITHUB,
+    "stackexchange.com": Platform.STACKEXCHANGE,
+    "stackoverflow.com": Platform.STACKEXCHANGE,
+    "disqus.com": Platform.DISQUS,
 }
+
+# Imported late-ish pattern: keep in sync with invites._SLACK_SYSTEM_HOSTS
+_SLACK_SYSTEM_HOSTS_NORM = frozenset(
+    {
+        "app",
+        "api",
+        "status",
+        "slack",
+        "www",
+        "get",
+        "help",
+        "join",
+        "dev",
+        "developer",
+        "developers",
+        "files",
+        "edge",
+        "hooks",
+        "corp",
+        "enterprise",
+        "admin",
+        "signin",
+        "login",
+        "docs",
+        "support",
+        "blog",
+        "store",
+        "download",
+        "downloads",
+        "mobile",
+        "desktop",
+        "sales",
+        "partners",
+        "security",
+        "legal",
+        "privacy",
+        "careers",
+        "about",
+        "cdn",
+        "auth",
+        "sso",
+        "billing",
+        "marketplace",
+        "apps",
+        "bot",
+        "bots",
+        "connect",
+        "demo",
+        "sandbox",
+        "example",
+        "sample",
+        "test",
+        "staging",
+        "community",
+        "communities",
+        "workspace-signin",
+        "solutions",
+        "resources",
+        "intl",
+        "ssb",
+        "go",
+        "my",
+        "a",
+        "b",
+        "mail",
+        "email",
+        "feedback",
+        "brand",
+        "newsroom",
+        "trust",
+        "slackb",
+        "slackhq",
+        "slack-marketing",
+        "slack-sales-and-cs",
+        "xyz",
+        "null",
+        "undefined",
+    }
+)
 
 
 def _strip_www(host: str) -> str:
@@ -122,9 +214,22 @@ def extract_platform_id(platform: Platform, domain: str, path: str) -> str | Non
         return None
 
     if platform == Platform.SLACK:
+        # join.slack.com/t/<workspace>/... — never treat "join" as the community id.
+        if domain in {"join.slack.com", "slack.com"}:
+            if "shared_invite" in parts:
+                # https://xxx.slack.com/shared_invite/<code> handled below via subdomain
+                pass
+            if "t" in parts:
+                idx = parts.index("t")
+                if idx + 1 < len(parts) and parts[idx + 1] not in _SLACK_SYSTEM_HOSTS_NORM:
+                    return parts[idx + 1].split("?")[0]
+            return None
         if domain.endswith(".slack.com") and domain != "slack.com":
-            return domain.removesuffix(".slack.com")
-        return parts[0] if parts else None
+            slug = domain.removesuffix(".slack.com")
+            if slug in _SLACK_SYSTEM_HOSTS_NORM:
+                return None
+            return slug
+        return None
 
     if platform == Platform.MIGHTY:
         if not parts or parts[0] in {"about", "pricing", "login"}:
@@ -137,6 +242,35 @@ def extract_platform_id(platform: Platform, domain: str, path: str) -> str | Non
             if idx + 1 < len(parts):
                 return parts[idx + 1]
         return "/".join(parts[:2]) if parts else None
+
+    if platform == Platform.REDDIT:
+        if "r" in parts:
+            idx = parts.index("r")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+        return None
+
+    if platform == Platform.GITHUB:
+        if len(parts) >= 3 and parts[2].lower() == "discussions":
+            return "/".join(parts[:2])
+        return None
+
+    if platform == Platform.STACKEXCHANGE:
+        if domain == "stackexchange.com" and "rooms" in parts:
+            idx = parts.index("rooms")
+            if idx + 1 < len(parts):
+                return parts[idx + 1]
+        return None
+
+    if platform in {
+        Platform.MATRIX,
+        Platform.GENEVA,
+        Platform.MATTERMOST,
+        Platform.ZULIP,
+        Platform.DISQUS,
+        Platform.DISCOURSE,
+    }:
+        return "/".join(parts[:4]) if parts else None
 
     return None
 
@@ -186,10 +320,50 @@ def normalize_url(url: str) -> NormalizedUrl:
     # Volume: keep platform pages even without id (canonical falls back to site:domain)
     if platform != Platform.CUSTOM and not platform_id and clean_path not in {"", "/"}:
         platform_id = clean_path.strip("/").split("/")[0] or None
+    # Never invent / wipe platform_id for join.slack.com invites.
+    if platform == Platform.SLACK:
+        if domain.endswith(".slack.com") and domain not in {"slack.com", "join.slack.com"}:
+            slug = domain.removesuffix(".slack.com")
+            if slug in _SLACK_SYSTEM_HOSTS_NORM:
+                platform_id = None
+        # Avoid volume fallback inventing platform_id="t" / "shared_invite"
+        if domain in {"join.slack.com", "slack.com"} and platform_id in {
+            "t",
+            "shared_invite",
+            "ssb",
+            "messages",
+            None,
+        }:
+            # re-run path parse only; leave None if invite workspace missing
+            parts = [p for p in clean_path.split("/") if p]
+            platform_id = None
+            if "t" in parts:
+                idx = parts.index("t")
+                if idx + 1 < len(parts) and parts[idx + 1] not in _SLACK_SYSTEM_HOSTS_NORM:
+                    platform_id = parts[idx + 1].split("?")[0]
     canonical_key = build_canonical_key(platform, domain, platform_id)
 
     blocked = _is_blocked_host(domain)
     reason = "blocked_domain" if blocked else None
+    if platform == Platform.SLACK:
+        # Block Slack product hosts (dev.slack.com, blog.slack.com, …).
+        # Keep join.slack.com/t/<workspace>/… invite URLs.
+        if domain == "join.slack.com":
+            if not platform_id:
+                blocked = True
+                reason = "slack_system_host"
+                canonical_key = "site:join.slack.com"
+        elif domain == "slack.com" and clean_path in {"", "/"}:
+            blocked = True
+            reason = "slack_system_host"
+            canonical_key = "site:slack.com"
+        elif domain.endswith(".slack.com"):
+            slug = domain.removesuffix(".slack.com")
+            if slug in _SLACK_SYSTEM_HOSTS_NORM:
+                blocked = True
+                reason = "slack_system_host"
+                platform_id = None
+                canonical_key = f"site:{domain}"
 
     return NormalizedUrl(
         original_url=url,

@@ -299,7 +299,6 @@ paid-community-usa
 skool-community-usa
 circle-community-usa
 slack-community-usa
-discord-community-usa
 mastermind-community-usa
 ceo-community-usa
 cfo-community-usa

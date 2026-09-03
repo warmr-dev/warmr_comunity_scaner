@@ -2,18 +2,26 @@ from community_scanner.models import DiscoveryHit
 from community_scanner.pipeline import _expand_discovery_invite_hits, _invites_from_hit
 
 
-def test_invites_from_hit_reads_snippet_invites():
+def test_invites_from_hit_keeps_active_platforms_only():
     hit = DiscoveryHit(
         url="https://example.com/list",
-        title="Top Telegram groups",
-        snippet="Join https://discord.gg/abc123 and https://t.me/+SecretHash today",
+        title="Top community links",
+        snippet=(
+            "Join https://discord.gg/abc123 and https://t.me/+SecretHash "
+            "plus https://join.slack.com/t/workspace/shared_invite/xyz "
+            "and https://www.skool.com/makers"
+        ),
         provider="searxng",
-        query="inurl:t.me/+",
+        query="slack invite",
     )
     invites = _invites_from_hit(hit)
     urls = {invite.url.lower().rstrip("/") for invite in invites}
-    assert "https://discord.gg/abc123" in urls
+    platforms = {invite.platform for invite in invites}
+    assert "https://join.slack.com/t/workspace/shared_invite/xyz" in urls
+    assert "https://www.skool.com/makers" in urls
     assert any("t.me" in url for url in urls)
+    assert "discord" not in platforms
+    assert {"slack", "skool", "telegram"} <= platforms
 
 
 def test_expand_discovery_invite_hits_promotes_snippet_urls():
@@ -27,5 +35,6 @@ def test_expand_discovery_invite_hits_promotes_snippet_urls():
         )
     ]
     expanded = _expand_discovery_invite_hits(hits)
-    assert len(expanded) == 2
+    assert len(expanded) == 3
+    assert any(hit.url.startswith("https://www.reddit.com/r/devops") for hit in expanded)
     assert any(hit.url.startswith("https://join.slack.com/") for hit in expanded)

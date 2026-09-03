@@ -4,16 +4,15 @@ from community_scanner.discovery.base import DEFAULT_SCAN_GEO, QueryParams, gene
 def test_default_geo_is_usa():
     queries = generate_queries(QueryParams(niche="it"), limit=8)
     assert queries
-    assert any("telegram" in q.lower() or "t.me" in q.lower() or "whatsapp" in q.lower() for q in queries)
+    assert any("slack" in q.lower() or "skool" in q.lower() or "paid" in q.lower() for q in queries)
 
 
 def test_all_platform_directory_templates():
     queries = generate_queries(QueryParams(niche="education"), limit=50)
     blob = " ".join(queries).lower()
-    assert "tgstat" in blob or "t.me" in blob
-    assert "whatsapp" in blob or "chat.whatsapp" in blob
     assert "slack" in blob or "join.slack" in blob
-    assert "discord" in blob or "disboard" in blob
+    assert "skool" in blob or "circle" in blob
+    assert "paid" in blob or "mastermind" in blob or "membership" in blob
 
 
 def test_no_paid_dictionary_trap():
@@ -23,17 +22,17 @@ def test_no_paid_dictionary_trap():
 
 
 def test_harvest_queries_are_invite_first():
-    queries = generate_queries(QueryParams(niche="harvest"), limit=20, harvest=True)
+    queries = generate_queries(QueryParams(niche="harvest"), limit=25, harvest=True)
     blob = " ".join(queries).lower()
-    assert "inurl:t.me/+" in blob or "t.me/+" in blob
-    assert "discord.gg" in blob or "discord.com/invite" in blob
-    assert "whatsapp" in blob or "chat.whatsapp" in blob
+    assert "join.slack" in blob or "shared_invite" in blob
+    assert "skool" in blob or "circle" in blob
+    assert "paid" in blob or "mastermind" in blob or "founder" in blob
 
 
 def test_harvest_with_niche_appends_soft_variants():
     queries = generate_queries(QueryParams(niche="devops"), limit=40, harvest=True)
     assert any("devops" in q.lower() for q in queries)
-    assert any(q.startswith("inurl:") and "devops" not in q.lower() for q in queries)
+    assert any(("inurl:" in q.lower() or "site:" in q.lower()) and "devops" not in q.lower() for q in queries)
 
 
 def test_resolve_geo_fallback():

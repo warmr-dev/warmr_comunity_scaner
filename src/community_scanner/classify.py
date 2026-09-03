@@ -136,11 +136,17 @@ def classify(item: ExtractedCommunity) -> ExtractedCommunity:
     }:
         score += 12
         if item.platform == Platform.SLACK:
-            score += 8
+            score += 10
             signals["slack_bonus"] = True
+        if item.platform in {Platform.SKOOL, Platform.CIRCLE}:
+            score += 8
+            signals["membership_platform_bonus"] = True
         if item.platform == Platform.TELEGRAM and item.size_members and item.size_members >= 1000:
             score += 8
             signals["telegram_size_bonus"] = True
+        if item.platform == Platform.DISCORD and item.size_members and item.size_members >= 500:
+            score += 8
+            signals["discord_size_bonus"] = True
         if item.platform == Platform.WHATSAPP:
             score += 4
             signals["whatsapp_bonus"] = True

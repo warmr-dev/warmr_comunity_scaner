@@ -4,7 +4,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from community_scanner.config import Settings
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams, generate_queries
+from community_scanner.discovery.bing import BingHtmlProvider
 from community_scanner.discovery.brave import BraveSearchProvider
+from community_scanner.discovery.ddg import DuckDuckGoProvider
 from community_scanner.discovery.directory_crawler import DirectoryCrawlerProvider
 from community_scanner.discovery.searxng import SearxngProvider
 from community_scanner.discovery.seeds import SeedsProvider
@@ -24,6 +26,20 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
                     country=settings.brave_country,
                     search_lang=settings.brave_search_lang,
                     max_requests=settings.brave_max_requests,
+                )
+            )
+        elif name in {"ddg", "duckduckgo"}:
+            providers.append(
+                DuckDuckGoProvider(
+                    timeout=settings.http_timeout_seconds,
+                    delay=max(1.2, settings.crawl_download_delay_seconds or 1.5),
+                )
+            )
+        elif name == "bing":
+            providers.append(
+                BingHtmlProvider(
+                    timeout=settings.http_timeout_seconds,
+                    delay=max(1.0, settings.crawl_download_delay_seconds or 1.2),
                 )
             )
         elif name in ("directory", "directories"):
@@ -75,7 +91,8 @@ def run_discovery(
     providers = build_providers(settings)
     if not providers:
         raise RuntimeError(
-            "No discovery providers configured. Set DISCOVERY_PROVIDERS=searxng or directory."
+            "No discovery providers configured. "
+            "Set DISCOVERY_PROVIDERS=ddg,searxng,directory, or brave."
         )
 
     hits: list[DiscoveryHit] = []

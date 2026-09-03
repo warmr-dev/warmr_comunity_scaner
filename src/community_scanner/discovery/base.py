@@ -55,67 +55,81 @@ class QueryParams:
     community_type: str | None = None
 
 
-# Phase 1: collect invite-shaped links only (filter later).
+# High-signal first: paid/pro communities that can reach medium/high value_tier.
 HARVEST_TEMPLATES = [
-    "inurl:t.me/+",
-    "inurl:t.me/joinchat",
-    "inurl:chat.whatsapp.com",
-    "inurl:discord.gg",
-    "inurl:discord.com/invite",
-    "inurl:join.slack.com",
+    # Paid / membership (Warmr high-value)
+    "paid community membership invite OR join founders OR operators",
+    "mastermind community invite slack OR skool OR circle",
+    '"$/mo" OR "$/month" skool community OR circle.so community',
+    "founder community slack invite link",
+    "CEO peer community invite OR membership",
+    "professional community membership site:skool.com OR site:circle.so",
+    # Slack invites (priority)
+    "inurl:join.slack.com/t/",
     "inurl:slack.com/shared_invite",
-    "site:tgstat.com/en",
-    "site:disboard.org/server",
-    "site:discord.me",
-    "site:discordservers.com",
-    '"t.me/+" invite OR group OR join',
-    '"chat.whatsapp.com/" invite OR group',
-    '"discord.gg/" invite OR server',
-    '"join.slack.com/t/" invite OR workspace',
-    "telegram group invite link -bot",
-    "whatsapp group invite link",
-    "discord server invite link -bot",
-    "slack workspace invite link",
-    "community chat invite telegram OR discord OR whatsapp OR slack",
+    '"join.slack.com/t/" invite OR workspace OR community',
+    '"shared_invite" site:slack.com',
+    "slack workspace invite link professionals OR founders",
+    'site:notion.so "join.slack.com"',
+    'site:github.com "join.slack.com/t/"',
+    # Skool / Circle
+    "site:skool.com",
+    '"skool.com/" community OR membership OR join',
+    "skool community paid OR membership",
+    "site:circle.so",
+    '"circle.so" community OR membership',
+    # Facebook / LinkedIn groups
+    "site:facebook.com/groups professional OR founders OR CPA OR lawyers",
+    'inurl:facebook.com/groups/ "join" OR community',
+    "site:linkedin.com/groups professional OR founders OR marketing",
+    'inurl:linkedin.com/groups/',
+    # Hive Index directory
+    "site:thehiveindex.com community slack OR circle OR facebook OR telegram",
+    "site:thehiveindex.com/communities/",
+    # WhatsApp pro groups
+    "inurl:chat.whatsapp.com",
+    '"chat.whatsapp.com/" professionals OR founders OR CPA OR lawyers',
+    # Telegram groups (not channels)
+    "inurl:t.me/+ professional OR founders OR developers group chat",
+    '"t.me/+" invite group professionals -channel -subscribers',
+    'telegram group chat "members" founders OR developers OR marketing -channel',
 ]
 
-# Soft niche variants appended in harvest when a niche is set (directory/search mix).
+# Soft niche variants appended in harvest when a niche is set.
 HARVEST_NICHE_TEMPLATES = [
-    'inurl:t.me/+ "{niche}"',
-    'inurl:discord.gg "{niche}"',
-    'inurl:chat.whatsapp.com "{niche}"',
     'inurl:join.slack.com "{niche}"',
-    'site:tgstat.com/en "{niche}"',
-    'site:disboard.org "{niche}"',
+    '"{niche}" "join.slack.com/t/" invite OR workspace',
+    '"{niche}" paid community OR membership skool OR circle OR slack',
+    '"{niche}" mastermind invite OR community',
+    'site:skool.com "{niche}"',
+    'site:circle.so "{niche}"',
+    'site:facebook.com/groups "{niche}"',
+    'site:linkedin.com/groups "{niche}"',
+    'site:thehiveindex.com "{niche}"',
+    'inurl:chat.whatsapp.com "{niche}"',
+    '"{niche}" telegram group chat "t.me/" -channel',
 ]
 
 # Niche-first templates (used when HARVEST_MODE=false).
 CHAT_TEMPLATES = [
-    'inurl:t.me/+ "{niche}"',
-    'inurl:t.me/joinchat "{niche}"',
-    'inurl:chat.whatsapp.com "{niche}"',
-    'inurl:discord.gg "{niche}"',
-    'inurl:discord.com/invite "{niche}"',
+    '"{niche}" paid community membership',
+    '"{niche}" mastermind community invite',
     'inurl:join.slack.com "{niche}"',
-    'inurl:slack.com/shared_invite "{niche}"',
-    'site:t.me "+{niche}"',
-    '"{niche}" "t.me/+"',
-    '"{niche}" "chat.whatsapp.com/"',
-    '"{niche}" "discord.gg/"',
     '"{niche}" "join.slack.com/t/"',
-    'site:tgstat.com/en "{niche}"',
-    'site:tgstat.com "{niche}" telegram',
-    'site:disboard.org/server "{niche}"',
-    'site:discord.me "{niche}"',
-    'site:discordservers.com "{niche}"',
-    '"{niche}" telegram invite link -bot -channel',
-    '"{niche}" whatsapp group invite link',
-    '"{niche}" discord invite link -bot',
-    '"{niche}" slack invite link workspace',
-    "join {niche} telegram group invite",
-    "join {niche} discord server invite",
-    "{audience} {niche} telegram group invite",
-    "{audience} {niche} discord invite",
+    '"{niche}" slack invite link founders OR professionals',
+    'site:skool.com "{niche}"',
+    '"{niche}" site:skool.com membership',
+    'site:circle.so "{niche}"',
+    '"{niche}" circle.so community',
+    'site:facebook.com/groups "{niche}"',
+    'site:linkedin.com/groups "{niche}"',
+    'inurl:chat.whatsapp.com "{niche}"',
+    '"{niche}" telegram group "t.me/" -channel',
+    "{audience} {niche} slack community invite",
+    "{audience} {niche} skool community",
+    "{audience} {niche} facebook group",
+    "{audience} {niche} linkedin group",
+    "{audience} {niche} paid community",
 ]
 
 
@@ -161,15 +175,16 @@ def generate_queries(
         return len(queries) >= limit
 
     if harvest:
-        for template in HARVEST_TEMPLATES:
-            if _add(template):
-                return queries
+        # Niche-first: when a concrete niche is set, search it before generic templates.
         if not niche_is_broad:
-            for term in niche_query_terms(niche)[:2]:
+            for term in niche_query_terms(niche)[:3]:
                 values = {"niche": term, "geo": geo, "audience": audience, "type": community_type}
                 for template in HARVEST_NICHE_TEMPLATES:
                     if _add(template.format(**values)):
                         return queries
+        for template in HARVEST_TEMPLATES:
+            if _add(template):
+                return queries
         return queries
 
     niche_terms = niche_query_terms(niche)

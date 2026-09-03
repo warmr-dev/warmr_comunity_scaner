@@ -24,11 +24,18 @@ def test_discord_home_kept_for_volume():
     assert n.canonical_key == "site:discordapp.com"
 
 
-def test_skool_platform_id():
-    n = normalize_url("https://www.skool.com/florida-cpa/about")
-    assert n.platform == Platform.SKOOL
-    assert n.platform_id == "florida-cpa"
-    assert n.canonical_key == "skool:florida-cpa"
+def test_slack_join_invite_key():
+    n = normalize_url("https://join.slack.com/t/delphiprogrammers/shared_invite/zt-abc")
+    assert n.platform == Platform.SLACK
+    assert n.platform_id == "delphiprogrammers"
+    assert n.canonical_key == "slack:delphiprogrammers"
+    assert not n.is_blocked
+
+
+def test_slack_system_host_blocked():
+    n = normalize_url("https://dev.slack.com/")
+    assert n.is_blocked
+    assert n.block_reason == "slack_system_host"
 
 
 def test_same_domain_different_communities():

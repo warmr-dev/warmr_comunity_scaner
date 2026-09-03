@@ -59,8 +59,14 @@ def test_classify_invite_shapes():
     assert classify_invite_url("https://t.me/+AbCdEfGhIjK")
     assert classify_invite_url("https://t.me/pythondevs")
     assert classify_invite_url("https://join.slack.com/t/foo/shared_invite/zt-1")
-    assert classify_invite_url("https://joinhampton.slack.com")
+    assert classify_invite_url("https://joinhampton.slack.com") is None
+    assert classify_invite_url("https://dev.slack.com") is None
+    assert classify_invite_url("https://blog.slack.com") is None
+    assert classify_invite_url("https://signin.slack.com") is None
     assert classify_invite_url("https://discord.gg/abcdef")
+    assert classify_invite_url("https://www.skool.com/makers")
+    assert classify_invite_url("https://makers.circle.so")
+    assert classify_invite_url("https://www.skool.com/discovery") is None
     assert classify_invite_url("https://wa.me/15551234567") is None
     assert classify_invite_url("https://t.me/share") is None
 
@@ -109,18 +115,18 @@ def test_classify_rejects_small_invite():
     assert out.value_tier == ValueTier.JUNK
 
 
-def test_classify_keeps_telegram_without_size():
-    """Volume mode: Telegram/Discord invites OK without public member count."""
+def test_classify_keeps_slack_without_size():
+    """Volume mode: Slack/WhatsApp/Skool/Circle OK without public member count."""
     from community_scanner.models import ExtractedCommunity, Platform
 
     item = ExtractedCommunity(
-        website="https://t.me/mystery",
-        canonical_key="telegram:mystery",
-        canonical_domain="t.me",
-        platform=Platform.TELEGRAM,
+        website="https://join.slack.com/t/mystery/shared_invite/zt-1",
+        canonical_key="slack:mystery",
+        canonical_domain="slack.com",
+        platform=Platform.SLACK,
         platform_id="mystery",
         name="Mystery",
-        join_url="https://t.me/mystery",
+        join_url="https://join.slack.com/t/mystery/shared_invite/zt-1",
         size_members=None,
         access_status=AccessStatus.JOIN,
     )

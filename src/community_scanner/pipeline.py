@@ -15,6 +15,7 @@ from community_scanner.discovery import QueryParams, run_discovery
 from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
 from community_scanner.invites import (
+    ACTIVE_HARVEST_PLATFORMS,
     MIN_MEMBERS_FOR_UPSERT,
     SIZE_OPTIONAL_PLATFORMS,
     classify_invite_url,
@@ -140,7 +141,7 @@ def _invites_from_hit(hit: DiscoveryHit, norm: NormalizedUrl | None = None):
         )
         if page_invite:
             invites = [page_invite]
-    return invites
+    return [i for i in invites if i.platform in ACTIVE_HARVEST_PLATFORMS]
 
 
 def _expand_discovery_invite_hits(hits: list[DiscoveryHit]) -> list[DiscoveryHit]:
@@ -166,46 +167,48 @@ def _expand_discovery_invite_hits(hits: list[DiscoveryHit]) -> list[DiscoveryHit
 
 
 DIRECTORY_HOST_HINTS = (
-    "tgstat.",
-    "telemetr.",
-    "combot.org",
-    "tlgrm.ru",
-    "t.me",
-    "telegram.me",
-    "chat.whatsapp.com",
-    "whatsapp.com",
     "join.slack.com",
     "slack.com",
-    "discord.gg",
-    "discord.com",
-    "disboard.org",
-    "top.gg",
-    "discord.me",
+    "chat.whatsapp.com",
+    "whatsapp.com",
+    "skool.com",
+    "circle.so",
+    "facebook.com/groups",
+    "linkedin.com/groups",
+    "thehiveindex.com",
+    "t.me",
 )
 
 
 def _invite_priority(hit: DiscoveryHit, norm: NormalizedUrl) -> int:
-    """Higher = fetch first. Prefer invite URLs and directory hosts."""
+    """Higher = fetch first. Slack first, then WA/Skool/Circle."""
     score = 0
     url_lc = (hit.url or "").lower()
     blob = " ".join(filter(None, [url_lc, hit.title or "", hit.snippet or ""])).lower()
-    if classify_invite_url(hit.url or ""):
+    invite = classify_invite_url(hit.url or "")
+    if invite and invite.platform in ACTIVE_HARVEST_PLATFORMS:
         score += 100
+        if invite.platform == "slack":
+            score += 40
     if any(h in url_lc for h in DIRECTORY_HOST_HINTS):
         score += 50
     if any(
         x in blob
         for x in (
-            "t.me/",
-            "chat.whatsapp.com",
             "join.slack.com",
             "shared_invite",
-            "discord.gg",
-            "discord.com/invite",
+            "chat.whatsapp.com",
+            "whatsapp.com/channel",
+            "skool.com/",
+            "circle.so",
+            "facebook.com/groups",
+            "linkedin.com/groups",
+            "thehiveindex.com",
+            "t.me/",
         )
     ):
         score += 30
-    if any(x in blob for x in ("telegram", "whatsapp", "slack", "discord")):
+    if any(x in blob for x in ("slack", "whatsapp", "skool", "circle", "facebook", "linkedin", "telegram")):
         score += 10
     return score
 
@@ -221,7 +224,7 @@ def _item_from_invite(
     harvest: bool = False,
 ) -> ExtractedCommunity | None:
     invite = classify_invite_url(invite_url)
-    if not invite:
+    if not invite or invite.platform not in ACTIVE_HARVEST_PLATFORMS:
         return None
     norm = normalize_url(invite.url)
     if norm.is_blocked:
@@ -339,6 +342,11 @@ def _upsert_invite_item(
         if meta.get("size_members") is not None:
             item.size_members = int(meta["size_members"])
             item.size_text = meta.get("size_text") or item.size_text
+        if meta.get("price_amount") is not None and not item.price_amount:
+            item.price_amount = float(meta["price_amount"])
+            item.price_text = meta.get("price_text") or item.price_text
+            item.currency = meta.get("currency") or item.currency or "USD"
+            item.is_professional = True
 
         if item.size_members is None:
             for blob in (

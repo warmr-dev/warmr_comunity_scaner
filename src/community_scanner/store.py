@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from community_scanner.models import CommunityRow, DiscoveryHit, DiscoveryResultRow, ExtractedCommunity
@@ -96,8 +97,19 @@ def upsert_community(session: Session, item: ExtractedCommunity) -> tuple[Commun
             last_seen_at=now,
             last_changed_at=now,
         )
-        session.add(row)
-        return row, True, True
+        try:
+            with session.begin_nested():
+                session.add(row)
+                session.flush()
+            return row, True, True
+        except IntegrityError:
+            # Parallel workers may race on the same canonical_key.
+            existing = session.scalar(
+                select(CommunityRow).where(CommunityRow.canonical_key == item.canonical_key)
+            )
+            if existing is None:
+                raise
+            now = datetime.now(timezone.utc)
 
     changed = False
     for field in CHANGED_FIELDS:

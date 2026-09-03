@@ -35,6 +35,15 @@ class Platform(str, Enum):
     MIGHTY = "mighty"
     FACEBOOK = "facebook"
     LINKEDIN = "linkedin"
+    REDDIT = "reddit"
+    DISCOURSE = "discourse"
+    MATRIX = "matrix"
+    GENEVA = "geneva"
+    MATTERMOST = "mattermost"
+    ZULIP = "zulip"
+    GITHUB = "github"
+    STACKEXCHANGE = "stackexchange"
+    DISQUS = "disqus"
     UNKNOWN = "unknown"
 
 
