@@ -38,7 +38,9 @@
     <section class="panel"><div class="table-wrap"><table><thead><tr><th>Community</th><th>Platform</th><th>Niche</th><th>Access</th><th>Members</th><th>Price</th><th>Score</th></tr></thead><tbody id="rows"></tbody></table></div><div class="footer"><span class="muted" id="shown"></span><div><button class="secondary" onclick="page(-1)">Previous</button> <button class="secondary" onclick="page(1)">Next</button></div></div></section>
   </section>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
+  let supabaseClient;
   let selectedPlatform = "", offset = 0, timer;
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
   async function get(url) { const response = await fetch(url); if (!response.ok) throw Error("Request failed"); return response.json(); }
@@ -55,8 +57,8 @@
   }
   function choosePlatform(value) { selectedPlatform=value; offset=0; loadAll(); } function page(delta) { offset=Math.max(0,offset + delta*50); loadCommunities(); }
   function debouncedLoad() { clearTimeout(timer); timer=setTimeout(() => { offset=0; loadCommunities(); }, 250); } async function loadAll() { try { await loadStats(); await loadCommunities(); } catch (error) { document.querySelector("#rows").innerHTML=`<tr><td class="empty" colspan="7">Could not connect to the database API</td></tr>`; } }
-  async function login(event) { event.preventDefault(); const response = await fetch("/api/auth", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email:document.querySelector("#email").value,password:document.querySelector("#password").value})}); if (!response.ok) { document.querySelector("#loginError").textContent = "Invalid email or password"; return; } document.body.classList.add("authenticated"); loadAll(); }
-  async function startApp() { const response = await fetch("/api/auth"); const data = await response.json(); if (data.authenticated) { document.body.classList.add("authenticated"); loadAll(); } }
+  async function login(event) { event.preventDefault(); const {error} = await supabaseClient.auth.signInWithPassword({email:document.querySelector("#email").value,password:document.querySelector("#password").value}); if (error) { document.querySelector("#loginError").textContent = "Invalid email or password"; return; } document.body.classList.add("authenticated"); loadAll(); }
+  async function startApp() { try { const response = await fetch("/api/config"); const config = await response.json(); if (!response.ok) throw Error(config.error); supabaseClient = window.supabase.createClient(config.url, config.key); const {data} = await supabaseClient.auth.getSession(); if (data.session) { document.body.classList.add("authenticated"); loadAll(); } } catch (error) { document.querySelector("#loginError").textContent = "Authentication is not configured"; } }
   startApp();
 </script>
 </body>
