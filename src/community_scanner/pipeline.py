@@ -815,7 +815,7 @@ def apply_serp_stubs(
         invites = _invites_from_hit(hit, norm)
 
         if not invites:
-            if idx == 1 or idx == total or idx % 10 == 0:
+            if idx == 1 or idx == total or idx % 50 == 0:
                 print(f"serp stubs {idx}/{total} (no invites)", flush=True)
             continue
 
@@ -848,12 +848,15 @@ def apply_serp_stubs(
                 harvest=harvest,
                 skip_enrich=skip_enrich,
             )
-        if idx == 1 or idx == total or idx % 5 == 0:
+        if idx == 1 or idx == total or idx % 50 == 0:
             print(
                 f"serp stubs {idx}/{total} invites={len(invites)} "
                 f"upserted_new={metrics.upserted_new}",
                 flush=True,
             )
+            if skip_enrich and idx % 200 == 0:
+                session.commit()
+                print(f"serp stubs mid-commit at {idx}", flush=True)
     print(f"serp stubs done upserted_new={metrics.upserted_new} rejects={metrics.reject_reasons}", flush=True)
 
 
@@ -943,15 +946,10 @@ def apply_outcomes(
     )
 
 
-def discover_candidates(
-    settings: Settings,
-    params: QueryParams,
-    *,
-    per_query: int,
-    query_limit: int,
-) -> tuple[list, dict[str, str], list[tuple[DiscoveryHit, NormalizedUrl]], PipelineMetrics]:
-    metrics = PipelineMetrics(queries_estimated=query_limit)
-    hits = run_discovery(settings, params, per_query=per_query, query_limit=query_limit)
+def _normalize_hit_batch(
+    hits: list[DiscoveryHit],
+    metrics: PipelineMetrics,
+) -> tuple[list[DiscoveryHit], dict[str, str], list[tuple[DiscoveryHit, NormalizedUrl]]]:
     expanded = _expand_discovery_invite_hits(hits)
     if len(expanded) > len(hits):
         print(
@@ -960,7 +958,7 @@ def discover_candidates(
             flush=True,
         )
     hits = expanded
-    metrics.discovery_hits = len(hits)
+    metrics.discovery_hits += len(hits)
 
     key_by_url: dict[str, str] = {}
     candidates: list[tuple[DiscoveryHit, NormalizedUrl]] = []
@@ -984,6 +982,122 @@ def discover_candidates(
         key=lambda pair: _invite_priority(pair[0], pair[1]),
         reverse=True,
     )
+    return hits, key_by_url, ranked
+
+
+def _persist_discovery_batch(
+    session: Session,
+    settings: Settings,
+    hits: list[DiscoveryHit],
+    metrics: PipelineMetrics,
+    *,
+    params: QueryParams,
+    max_fetch: int,
+) -> None:
+    """Write discovery_results + raw_candidates + community stubs, then commit."""
+    if not hits:
+        return
+    hits, key_by_url, unique_candidates = _normalize_hit_batch(hits, metrics)
+    print(
+        f"normalize batch hits={len(hits)} unique={len(unique_candidates)} "
+        f"blocked={metrics.blocked}",
+        flush=True,
+    )
+    n_disc = save_discovery_hits(session, hits, key_by_url)
+    session.commit()
+    print(f"discovery_results committed rows={n_disc}", flush=True)
+
+    if settings.save_raw_candidates:
+        raw_stats = upsert_raw_candidates(
+            session,
+            hits,
+            min_likelihood=settings.raw_min_likelihood,
+        )
+        metrics.raw_candidates_seen += raw_stats.get("seen", 0)
+        metrics.raw_candidates_inserted += raw_stats.get("inserted", 0)
+        metrics.raw_candidates_dup += raw_stats.get("dup", 0)
+        metrics.raw_candidates_skipped_low += raw_stats.get("skipped_low", 0)
+        session.commit()
+        print(f"raw_candidates committed {raw_stats}", flush=True)
+
+    harvest = bool(settings.harvest_mode)
+    skip_enrich = bool(harvest and settings.harvest_skip_enrich)
+    scan_geo = resolve_geo(params.geo)
+    apply_serp_stubs(
+        session,
+        unique_candidates[:max_fetch],
+        metrics,
+        scan_geo=scan_geo,
+        niche=params.niche,
+        harvest=harvest,
+        skip_enrich=skip_enrich,
+    )
+    session.commit()
+    print(
+        f"community stubs committed upserted_new={metrics.upserted_new} "
+        f"rejects={metrics.reject_reasons}",
+        flush=True,
+    )
+
+
+def run_mass_pipeline(
+    session: Session,
+    settings: Settings,
+    params: QueryParams,
+    *,
+    query_limit: int = 80,
+    per_query: int = 100,
+    max_fetch: int = 5000,
+) -> PipelineResult:
+    """High-volume free discovery: persist after each crawl provider (no HTTP enrich)."""
+    from community_scanner.discovery import build_providers, _crawl_safe
+
+    metrics = PipelineMetrics(queries_estimated=query_limit)
+    run_id = _start_run(session)
+    budget = max(per_query * query_limit, 500)
+
+    try:
+        print(
+            f"mass pipeline start niche={params.niche!r} geo={params.geo!r} "
+            f"budget={budget} max_fetch={max_fetch}",
+            flush=True,
+        )
+        providers = build_providers(settings)
+        crawl_providers = [p for p in providers if callable(getattr(p, "crawl", None))]
+        if not crawl_providers:
+            raise RuntimeError("mass pipeline needs crawl providers (commoncrawl,hive,...)")
+
+        for provider in crawl_providers:
+            print(f"mass provider start [{provider.name}] budget={budget}", flush=True)
+            hits = _crawl_safe(provider, params, budget)
+            print(f"mass provider crawl done [{provider.name}] hits={len(hits)}", flush=True)
+            _persist_discovery_batch(
+                session,
+                settings,
+                hits,
+                metrics,
+                params=params,
+                max_fetch=max_fetch,
+            )
+
+        _finalize_run(session, run_id, status="success", metrics=metrics)
+        print(f"mass pipeline done run_id={run_id} metrics={metrics.as_dict()}", flush=True)
+        return PipelineResult(metrics=metrics, run_id=run_id)
+    except Exception as exc:  # noqa: BLE001
+        _finalize_run(session, run_id, status="error", metrics=metrics, error=str(exc))
+        raise
+
+
+def discover_candidates(
+    settings: Settings,
+    params: QueryParams,
+    *,
+    per_query: int,
+    query_limit: int,
+) -> tuple[list, dict[str, str], list[tuple[DiscoveryHit, NormalizedUrl]], PipelineMetrics]:
+    metrics = PipelineMetrics(queries_estimated=query_limit)
+    hits = run_discovery(settings, params, per_query=per_query, query_limit=query_limit)
+    hits, key_by_url, ranked = _normalize_hit_batch(hits, metrics)
     return hits, key_by_url, ranked, metrics
 
 
@@ -1115,7 +1229,10 @@ def run_pipeline(
             f"blocked={metrics.blocked}",
             flush=True,
         )
-        save_discovery_hits(session, hits, key_by_url)
+        n_disc = save_discovery_hits(session, hits, key_by_url)
+        session.commit()
+        print(f"discovery_results committed rows={n_disc}", flush=True)
+
         if settings.save_raw_candidates:
             raw_stats = upsert_raw_candidates(
                 session,
@@ -1126,7 +1243,8 @@ def run_pipeline(
             metrics.raw_candidates_inserted = raw_stats.get("inserted", 0)
             metrics.raw_candidates_dup = raw_stats.get("dup", 0)
             metrics.raw_candidates_skipped_low = raw_stats.get("skipped_low", 0)
-            print(f"raw_candidates {raw_stats}", flush=True)
+            session.commit()
+            print(f"raw_candidates committed {raw_stats}", flush=True)
 
         llm_on = settings.llm_enabled if use_llm is None else use_llm
         scan_geo = resolve_geo(params.geo)
@@ -1145,6 +1263,17 @@ def run_pipeline(
         )
         session.commit()
         print("serp stubs committed", flush=True)
+
+        # Mass/harvest: skip HTTP fetch — discovery URLs already upserted as stubs.
+        if skip_enrich:
+            print(
+                f"harvest skip fetch (volume mode) unique={len(unique_candidates)} "
+                f"upserted_new={metrics.upserted_new}",
+                flush=True,
+            )
+            _finalize_run(session, run_id, status="success", metrics=metrics)
+            print(f"pipeline done run_id={run_id} metrics={metrics.as_dict()}", flush=True)
+            return PipelineResult(metrics=metrics, run_id=run_id)
 
         inline = unique_candidates[:max_fetch]
         overflow = unique_candidates[max_fetch:]

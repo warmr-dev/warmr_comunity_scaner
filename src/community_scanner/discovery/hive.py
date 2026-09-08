@@ -107,7 +107,7 @@ class HiveIndexProvider(DiscoveryProvider):
                 except Exception:  # noqa: BLE001
                     continue
 
-            detail_budget = min(len(community_urls), max(count, self.max_detail_pages))
+            detail_budget = min(len(community_urls), self.max_detail_pages, max(count, 1))
             print(
                 f"hive listing communities={len(community_urls)} "
                 f"detail_budget={detail_budget}",

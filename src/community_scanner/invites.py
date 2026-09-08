@@ -237,6 +237,7 @@ ACTIVE_HARVEST_PLATFORMS = frozenset(
         "discourse",
         "matrix",
         "geneva",
+        "mighty",
         "mattermost",
         "zulip",
         "github",
@@ -533,6 +534,31 @@ def invite_from_platform_page(website: str, platform: str | None, platform_id: s
                 platform="circle",
                 rule="circle_platform_id",
             )
+    if platform_lc == "reddit":
+        return InviteMatch(
+            url=f"https://www.reddit.com/r/{platform_id}",
+            platform="reddit",
+            rule="reddit_platform_id",
+        )
+    if platform_lc == "facebook":
+        return InviteMatch(
+            url=f"https://www.facebook.com/groups/{platform_id}",
+            platform="facebook",
+            rule="facebook_platform_id",
+        )
+    if platform_lc == "linkedin":
+        return InviteMatch(
+            url=f"https://www.linkedin.com/groups/{platform_id}",
+            platform="linkedin",
+            rule="linkedin_platform_id",
+        )
+    if platform_lc in {"geneva", "mighty", "mightynetworks"}:
+        plat = "mighty" if platform_lc in {"mighty", "mightynetworks"} else "geneva"
+        return InviteMatch(
+            url=website,
+            platform=plat,
+            rule=f"{plat}_platform_page",
+        )
     return None
 
 

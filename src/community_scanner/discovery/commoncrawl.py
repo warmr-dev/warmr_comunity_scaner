@@ -32,7 +32,14 @@ DEFAULT_PATTERNS: tuple[str, ...] = (
     "linkedin.com/groups/*",
     "old.reddit.com/r/*",
     "www.reddit.com/r/*",
+    "reddit.com/r/*",
     "*.geneva.com/*",
+    "groups.io/g/*",
+    "www.meetup.com/*",
+    "meetup.com/*",
+    "*.discourse.group/*",
+    "*.discourse.org/*",
+    "forum.*/*",
 )
 
 _SKIP_SLUGS = {
@@ -107,6 +114,14 @@ def _canonical_community_url(url: str) -> str | None:
             return f"https://www.mightynetworks.com/app/{parts[1]}"
         if parts[0] not in _SKIP_SLUGS:
             return f"https://www.mightynetworks.com/{parts[0]}"
+
+    if host.endswith("groups.io") and len(parts) >= 2 and parts[0] == "g":
+        return f"https://groups.io/g/{parts[1]}"
+
+    if host.endswith("meetup.com") and parts:
+        slug = parts[0].lower()
+        if slug not in _SKIP_SLUGS | {"find", "cities", "topics", "login", "register"}:
+            return f"https://www.meetup.com/{parts[0]}"
 
     return None
 
@@ -197,17 +212,16 @@ class CommonCrawlProvider(DiscoveryProvider):
         cdx_api: str,
         pattern: str,
         *,
-        resume_key: str | None = None,
-    ) -> tuple[list[dict], str | None]:
+        page: int = 0,
+    ) -> list[dict]:
+        # Page-based CDX pagination is more reliable than resumeKey across indexes.
         params = {
             "url": pattern,
             "output": "json",
             "fl": "url",
             "limit": str(self.page_size),
-            "showResumeKey": "true",
+            "page": str(page),
         }
-        if resume_key:
-            params["resumeKey"] = resume_key
         for attempt in range(1, 4):
             try:
                 resp = client.get(cdx_api, params=params)
@@ -215,44 +229,38 @@ class CommonCrawlProvider(DiscoveryProvider):
                     wait = attempt * 1.5
                     print(
                         f"commoncrawl {resp.status_code} pattern={pattern!r} "
-                        f"sleep={wait:.1f}s",
+                        f"page={page} sleep={wait:.1f}s",
                         flush=True,
                     )
                     time.sleep(wait)
                     continue
                 if resp.status_code == 404:
-                    return [], None
+                    return []
                 resp.raise_for_status()
-                lines = [ln.strip() for ln in resp.text.splitlines() if ln.strip()]
                 rows: list[dict] = []
-                next_key: str | None = None
-                for i, line in enumerate(lines):
+                for line in resp.text.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
                     try:
                         obj = json.loads(line)
                     except json.JSONDecodeError:
-                        # Trailing resume key is often a bare string.
-                        if i == len(lines) - 1 and rows and "://" not in line:
-                            next_key = line
+                        if line.startswith("http"):
+                            rows.append({"url": line})
                         continue
                     if isinstance(obj, dict) and obj.get("url"):
                         rows.append(obj)
                     elif isinstance(obj, str) and obj.startswith("http"):
                         rows.append({"url": obj})
-                    elif isinstance(obj, list) and obj and isinstance(obj[0], str):
-                        # CDX sometimes returns ["url", ...] when fl omitted; ignore.
-                        if obj[0].startswith("http"):
-                            rows.append({"url": obj[0]})
-                if lines and not next_key:
-                    last = lines[-1]
-                    if "://" not in last and not last.startswith(("{", "[", '"')):
-                        next_key = last
-                return rows, next_key
+                    elif isinstance(obj, list) and obj and isinstance(obj[0], str) and obj[0].startswith("http"):
+                        rows.append({"url": obj[0]})
+                return rows
             except httpx.HTTPError as exc:
                 if attempt == 3:
                     log.warning("commoncrawl fetch failed pattern=%s: %s", pattern, exc)
-                    return [], None
+                    return []
                 time.sleep(attempt * 1.2)
-        return [], None
+        return []
 
     def crawl(self, params: QueryParams, count: int = 100) -> list[DiscoveryHit]:
         niche = (params.niche or "").strip()
@@ -277,20 +285,24 @@ class CommonCrawlProvider(DiscoveryProvider):
                 if len(hits) >= budget:
                     break
                 state_key = f"{index_id}::{pattern}"
-                resume = resume_state.get(state_key) if self.persist_resume else None
+                start_page = 0
+                if self.persist_resume:
+                    raw = resume_state.get(state_key)
+                    if isinstance(raw, int):
+                        start_page = raw
+                    elif isinstance(raw, str) and raw.isdigit():
+                        start_page = int(raw)
                 pages = self.max_pages_per_pattern or 1
-                for page in range(pages):
+                for page_i in range(pages):
                     if len(hits) >= budget:
                         break
-                    if self.delay_ms and (page > 0 or pattern != self.patterns[0]):
+                    page = start_page + page_i
+                    if self.delay_ms and (page_i > 0 or pattern != self.patterns[0]):
                         time.sleep(self.delay_ms / 1000.0)
-                    rows, next_key = self._fetch_page(
-                        client, cdx_api, pattern, resume_key=resume
-                    )
+                    rows = self._fetch_page(client, cdx_api, pattern, page=page)
                     if not rows:
-                        # Exhausted this pattern on this index — clear resume.
-                        if self.persist_resume and state_key in resume_state:
-                            resume_state.pop(state_key, None)
+                        if self.persist_resume:
+                            resume_state[state_key] = 0  # wrap for next cycle on this index
                         break
                     kept = 0
                     for row in rows:
@@ -304,11 +316,9 @@ class CommonCrawlProvider(DiscoveryProvider):
                         score = community_likelihood(clean)
                         if score < self.min_likelihood:
                             continue
-                        # Soft niche filter: keep if niche token appears in URL/path.
                         if niche and niche.lower() not in {"harvest", "all", "any", "business"}:
                             token = niche.replace("-", " ").split()[0].lower()
                             if token and token not in clean.lower() and len(token) > 3:
-                                # Still keep high-confidence platform invites.
                                 if score < 0.85:
                                     continue
                         seen.add(key)
@@ -324,19 +334,15 @@ class CommonCrawlProvider(DiscoveryProvider):
                         kept += 1
                         if len(hits) >= budget:
                             break
-                    resume = next_key
+                    next_page = page + 1
                     if self.persist_resume:
-                        if next_key:
-                            resume_state[state_key] = next_key
-                        else:
-                            resume_state.pop(state_key, None)
+                        resume_state[state_key] = next_page
                     print(
                         f"commoncrawl pattern={pattern!r} page={page} "
-                        f"rows={len(rows)} kept={kept} total={len(hits)} "
-                        f"resume={'yes' if next_key else 'no'}",
+                        f"rows={len(rows)} kept={kept} total={len(hits)} next={next_page}",
                         flush=True,
                     )
-                    if not next_key:
+                    if len(rows) < self.page_size:
                         break
 
         if self.persist_resume:

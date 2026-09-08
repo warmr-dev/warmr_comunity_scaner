@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
@@ -42,10 +43,22 @@ CHANGED_FIELDS = (
 )
 
 
-def save_discovery_hits(session: Session, hits: list[DiscoveryHit], canonical_keys: dict[str, str]) -> int:
-    rows = []
+def save_discovery_hits(
+    session: Session,
+    hits: list[DiscoveryHit],
+    canonical_keys: dict[str, str],
+    *,
+    batch_size: int = 500,
+) -> int:
+    """Write discovery_results in batches with progress logs (keeps DB responsive)."""
+    total = len(hits)
+    if total == 0:
+        return 0
+    print(f"discovery_results write start rows={total}", flush=True)
+    written = 0
+    batch: list[DiscoveryResultRow] = []
     for hit in hits:
-        rows.append(
+        batch.append(
             DiscoveryResultRow(
                 url=hit.url,
                 title=hit.title,
@@ -55,8 +68,18 @@ def save_discovery_hits(session: Session, hits: list[DiscoveryHit], canonical_ke
                 canonical_key=canonical_keys.get(hit.url),
             )
         )
-    session.add_all(rows)
-    return len(rows)
+        if len(batch) >= batch_size:
+            session.add_all(batch)
+            session.flush()
+            written += len(batch)
+            print(f"discovery_results {written}/{total}", flush=True)
+            batch = []
+    if batch:
+        session.add_all(batch)
+        session.flush()
+        written += len(batch)
+        print(f"discovery_results {written}/{total}", flush=True)
+    return written
 
 
 def _source_record_id(hit: DiscoveryHit, canonical_key: str | None) -> str:
@@ -71,9 +94,47 @@ def upsert_raw_candidates(
     hits: list[DiscoveryHit],
     *,
     min_likelihood: float = 0.0,
+    batch_size: int = 300,
 ) -> dict[str, int]:
-    """Persist bulk discovery hits into raw_candidates. Returns counters."""
+    """Persist bulk discovery hits into raw_candidates (batched, no per-row SELECT)."""
     stats = {"seen": 0, "inserted": 0, "skipped_low": 0, "dup": 0}
+    bind = session.get_bind()
+    dialect = getattr(getattr(bind, "dialect", None), "name", "") or ""
+    now = datetime.now(timezone.utc)
+    pending: list[dict] = []
+    seen_keys: set[tuple[str, str]] = set()
+
+    def _flush_pending() -> None:
+        nonlocal pending
+        if not pending:
+            return
+        chunk = pending
+        pending = []
+        if dialect == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            stmt = (
+                pg_insert(RawCandidateRow)
+                .values(chunk)
+                .on_conflict_do_nothing(constraint="uq_raw_candidates_source_record")
+            )
+            result = session.execute(stmt)
+            # rowcount is inserts only when available
+            inserted = result.rowcount if result.rowcount is not None and result.rowcount >= 0 else len(chunk)
+            stats["inserted"] += max(0, inserted)
+            stats["dup"] += max(0, len(chunk) - max(0, inserted))
+        else:
+            for row in chunk:
+                try:
+                    with session.begin_nested():
+                        session.add(RawCandidateRow(**row))
+                        session.flush()
+                    stats["inserted"] += 1
+                except IntegrityError:
+                    stats["dup"] += 1
+        session.flush()
+
+    print(f"raw_candidates write start hits={len(hits)}", flush=True)
     for hit in hits:
         stats["seen"] += 1
         if not hit.url:
@@ -87,48 +148,35 @@ def upsert_raw_candidates(
         platform = None if norm.is_blocked else norm.platform.value
         platform_id = None if norm.is_blocked else norm.platform_id
         source_id = _source_record_id(hit, canonical_key)
+        dedupe = (hit.provider, source_id)
+        if dedupe in seen_keys:
+            stats["dup"] += 1
+            continue
+        seen_keys.add(dedupe)
         payload_hash = hashlib.sha1(
             f"{hit.provider}|{hit.url}|{hit.query or ''}".encode()
         ).hexdigest()
-
-        existing = session.scalar(
-            select(RawCandidateRow).where(
-                RawCandidateRow.source_provider == hit.provider,
-                RawCandidateRow.source_record_id == source_id,
-            )
+        pending.append(
+            {
+                "id": str(uuid4()),
+                "url": hit.url,
+                "canonical_key": canonical_key,
+                "platform": platform,
+                "platform_id": platform_id,
+                "source_provider": hit.provider,
+                "source_record_id": source_id,
+                "title": hit.title,
+                "snippet": hit.snippet,
+                "raw_payload_hash": payload_hash,
+                "community_likelihood": score,
+                "status": "normalized" if canonical_key else "new",
+                "discovered_at": now,
+            }
         )
-        if existing is not None:
-            existing.community_likelihood = max(existing.community_likelihood, score)
-            existing.title = hit.title or existing.title
-            existing.snippet = hit.snippet or existing.snippet
-            if canonical_key and not existing.canonical_key:
-                existing.canonical_key = canonical_key
-                existing.platform = platform
-                existing.platform_id = platform_id
-            stats["dup"] += 1
-            continue
-
-        row = RawCandidateRow(
-            url=hit.url,
-            canonical_key=canonical_key,
-            platform=platform,
-            platform_id=platform_id,
-            source_provider=hit.provider,
-            source_record_id=source_id,
-            title=hit.title,
-            snippet=hit.snippet,
-            raw_payload_hash=payload_hash,
-            community_likelihood=score,
-            status="normalized" if canonical_key else "new",
-            discovered_at=datetime.now(timezone.utc),
-        )
-        try:
-            with session.begin_nested():
-                session.add(row)
-                session.flush()
-            stats["inserted"] += 1
-        except IntegrityError:
-            stats["dup"] += 1
+        if len(pending) >= batch_size:
+            _flush_pending()
+            print(f"raw_candidates progress seen={stats['seen']} inserted={stats['inserted']}", flush=True)
+    _flush_pending()
     return stats
 
 

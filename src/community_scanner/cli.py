@@ -6,7 +6,7 @@ import json
 from community_scanner.config import get_settings
 from community_scanner.discovery import QueryParams
 from community_scanner.models import Base
-from community_scanner.pipeline import run_discovery_only, run_fetch_worker, run_pipeline
+from community_scanner.pipeline import run_discovery_only, run_fetch_worker, run_mass_pipeline, run_pipeline
 from community_scanner.queue import queue_length
 from community_scanner.store import make_engine, make_session_factory
 from community_scanner.sync import dry_run_sync, sync_rows_to_warmr
@@ -71,14 +71,13 @@ def cmd_mass_fill(args: argparse.Namespace) -> None:
         flush=True,
     )
     with Session() as session:
-        result = run_pipeline(
+        result = run_mass_pipeline(
             session,
             settings,
             params,
             query_limit=args.queries,
             per_query=args.per_query,
             max_fetch=args.max_fetch,
-            use_llm=False,
         )
     print(json.dumps({"run_id": result.run_id, "metrics": result.metrics.as_dict()}, indent=2))
 
