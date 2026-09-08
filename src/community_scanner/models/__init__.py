@@ -3,7 +3,6 @@ from community_scanner.models.db import (
     CommunityRow,
     DiscoveryResultRow,
     PipelineRunRow,
-    RawCandidateRow,
 )
 from community_scanner.models.schemas import (
     AccessStatus,
@@ -27,7 +26,6 @@ __all__ = [
     "NormalizedUrl",
     "PipelineRunRow",
     "Platform",
-    "RawCandidateRow",
     "SyncStatus",
     "ValueTier",
 ]

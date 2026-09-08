@@ -55,7 +55,6 @@ def cmd_mass_fill(args: argparse.Namespace) -> None:
     updates = {
         "harvest_mode": True,
         "harvest_skip_enrich": True,
-        "save_raw_candidates": True,
     }
     if not mass_ok:
         updates["discovery_providers"] = "commoncrawl,hive"
@@ -215,7 +214,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_mass = sub.add_parser(
         "mass-fill",
-        help="High-volume fill via Common Crawl + Hive (writes raw_candidates + communities)",
+        help="High-volume fill via Common Crawl + Hive (writes discovery_results + communities)",
     )
     p_mass.add_argument("--geo", default="USA")
     p_mass.add_argument("--niche", default="harvest")

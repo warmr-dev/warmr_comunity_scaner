@@ -35,7 +35,7 @@ from community_scanner.models import (
 )
 from community_scanner.normalize import JUNK_HINTS, normalize_url
 from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
-from community_scanner.store import save_discovery_hits, upsert_community, upsert_raw_candidates
+from community_scanner.store import save_discovery_hits, upsert_community
 
 USER_AGENT = "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
 log = logging.getLogger(__name__)
@@ -517,10 +517,6 @@ class PipelineMetrics:
     skipped_junk: int = 0
     llm_calls: int = 0
     enqueued: int = 0
-    raw_candidates_seen: int = 0
-    raw_candidates_inserted: int = 0
-    raw_candidates_dup: int = 0
-    raw_candidates_skipped_low: int = 0
     reject_reasons: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -994,7 +990,7 @@ def _persist_discovery_batch(
     params: QueryParams,
     max_fetch: int,
 ) -> None:
-    """Write discovery_results + raw_candidates + community stubs, then commit."""
+    """Write discovery_results + community stubs, then commit."""
     if not hits:
         return
     hits, key_by_url, unique_candidates = _normalize_hit_batch(hits, metrics)
@@ -1006,19 +1002,6 @@ def _persist_discovery_batch(
     n_disc = save_discovery_hits(session, hits, key_by_url)
     session.commit()
     print(f"discovery_results committed rows={n_disc}", flush=True)
-
-    if settings.save_raw_candidates:
-        raw_stats = upsert_raw_candidates(
-            session,
-            hits,
-            min_likelihood=settings.raw_min_likelihood,
-        )
-        metrics.raw_candidates_seen += raw_stats.get("seen", 0)
-        metrics.raw_candidates_inserted += raw_stats.get("inserted", 0)
-        metrics.raw_candidates_dup += raw_stats.get("dup", 0)
-        metrics.raw_candidates_skipped_low += raw_stats.get("skipped_low", 0)
-        session.commit()
-        print(f"raw_candidates committed {raw_stats}", flush=True)
 
     harvest = bool(settings.harvest_mode)
     skip_enrich = bool(harvest and settings.harvest_skip_enrich)
@@ -1121,17 +1104,7 @@ def run_discovery_only(
             query_limit=query_limit,
         )
         save_discovery_hits(session, hits, key_by_url)
-        if settings.save_raw_candidates:
-            raw_stats = upsert_raw_candidates(
-                session,
-                hits,
-                min_likelihood=settings.raw_min_likelihood,
-            )
-            metrics.raw_candidates_seen = raw_stats.get("seen", 0)
-            metrics.raw_candidates_inserted = raw_stats.get("inserted", 0)
-            metrics.raw_candidates_dup = raw_stats.get("dup", 0)
-            metrics.raw_candidates_skipped_low = raw_stats.get("skipped_low", 0)
-            session.commit()
+        session.commit()
 
         if enqueue_all and settings.use_fetch_queue and unique_candidates:
             scan_geo = resolve_geo(params.geo)
@@ -1232,19 +1205,6 @@ def run_pipeline(
         n_disc = save_discovery_hits(session, hits, key_by_url)
         session.commit()
         print(f"discovery_results committed rows={n_disc}", flush=True)
-
-        if settings.save_raw_candidates:
-            raw_stats = upsert_raw_candidates(
-                session,
-                hits,
-                min_likelihood=settings.raw_min_likelihood,
-            )
-            metrics.raw_candidates_seen = raw_stats.get("seen", 0)
-            metrics.raw_candidates_inserted = raw_stats.get("inserted", 0)
-            metrics.raw_candidates_dup = raw_stats.get("dup", 0)
-            metrics.raw_candidates_skipped_low = raw_stats.get("skipped_low", 0)
-            session.commit()
-            print(f"raw_candidates committed {raw_stats}", flush=True)
 
         llm_on = settings.llm_enabled if use_llm is None else use_llm
         scan_geo = resolve_geo(params.geo)

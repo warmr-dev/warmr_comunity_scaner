@@ -26,7 +26,6 @@ COMMONCRAWL_MAX_PAGES_PER_PATTERN=30
 COMMONCRAWL_PAGE_SIZE=400
 HIVE_MAX_DETAIL_PAGES=1200
 HIVE_EXCLUDE_DISCORD_TELEGRAM=true
-SAVE_RAW_CANDIDATES=true
 HARVEST_MODE=true
 HARVEST_SKIP_ENRICH=true
 ```
@@ -62,7 +61,7 @@ DATAFORSEO_LOGIN=...
 DATAFORSEO_PASSWORD=...
 ```
 
-Сырые URL пишутся в `raw_candidates`, затем в `community_scanner`.
+Сырые URL пишутся в `discovery_results`, затем в `community_scanner`.
 
 ```bash
 community-scanner mass-fill --queries 40 --per-query 100 --max-fetch 2000
@@ -110,7 +109,7 @@ FETCH_BATCH_SIZE=1000
 
 | Команда | Назначение |
 |---------|------------|
-| `mass-fill` | Common Crawl + Hive → raw_candidates + communities |
+| `mass-fill` | Common Crawl + Hive → discovery_results + communities |
 | `run` | Discovery + fetch без очереди |
 | `discover` | Discovery → Redis queue |
 | `worker` | Параллельный fetch из очереди |

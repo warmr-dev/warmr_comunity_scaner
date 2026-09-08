@@ -1,23 +1,18 @@
 from __future__ import annotations
 
-import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from community_scanner.likelihood import community_likelihood
 from community_scanner.models import (
     CommunityRow,
     DiscoveryHit,
     DiscoveryResultRow,
     ExtractedCommunity,
-    RawCandidateRow,
 )
-from community_scanner.normalize import normalize_url
 
 
 def make_engine(database_url: str):
@@ -80,104 +75,6 @@ def save_discovery_hits(
         written += len(batch)
         print(f"discovery_results {written}/{total}", flush=True)
     return written
-
-
-def _source_record_id(hit: DiscoveryHit, canonical_key: str | None) -> str:
-    if canonical_key:
-        return canonical_key[:512]
-    digest = hashlib.sha1(hit.url.encode("utf-8", errors="ignore")).hexdigest()
-    return f"url:{digest}"
-
-
-def upsert_raw_candidates(
-    session: Session,
-    hits: list[DiscoveryHit],
-    *,
-    min_likelihood: float = 0.0,
-    batch_size: int = 300,
-) -> dict[str, int]:
-    """Persist bulk discovery hits into raw_candidates (batched, no per-row SELECT)."""
-    stats = {"seen": 0, "inserted": 0, "skipped_low": 0, "dup": 0}
-    bind = session.get_bind()
-    dialect = getattr(getattr(bind, "dialect", None), "name", "") or ""
-    now = datetime.now(timezone.utc)
-    pending: list[dict] = []
-    seen_keys: set[tuple[str, str]] = set()
-
-    def _flush_pending() -> None:
-        nonlocal pending
-        if not pending:
-            return
-        chunk = pending
-        pending = []
-        if dialect == "postgresql":
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-
-            stmt = (
-                pg_insert(RawCandidateRow)
-                .values(chunk)
-                .on_conflict_do_nothing(constraint="uq_raw_candidates_source_record")
-            )
-            result = session.execute(stmt)
-            # rowcount is inserts only when available
-            inserted = result.rowcount if result.rowcount is not None and result.rowcount >= 0 else len(chunk)
-            stats["inserted"] += max(0, inserted)
-            stats["dup"] += max(0, len(chunk) - max(0, inserted))
-        else:
-            for row in chunk:
-                try:
-                    with session.begin_nested():
-                        session.add(RawCandidateRow(**row))
-                        session.flush()
-                    stats["inserted"] += 1
-                except IntegrityError:
-                    stats["dup"] += 1
-        session.flush()
-
-    print(f"raw_candidates write start hits={len(hits)}", flush=True)
-    for hit in hits:
-        stats["seen"] += 1
-        if not hit.url:
-            continue
-        score = community_likelihood(hit.url, title=hit.title, snippet=hit.snippet)
-        if score < min_likelihood:
-            stats["skipped_low"] += 1
-            continue
-        norm = normalize_url(hit.url)
-        canonical_key = None if norm.is_blocked else norm.canonical_key
-        platform = None if norm.is_blocked else norm.platform.value
-        platform_id = None if norm.is_blocked else norm.platform_id
-        source_id = _source_record_id(hit, canonical_key)
-        dedupe = (hit.provider, source_id)
-        if dedupe in seen_keys:
-            stats["dup"] += 1
-            continue
-        seen_keys.add(dedupe)
-        payload_hash = hashlib.sha1(
-            f"{hit.provider}|{hit.url}|{hit.query or ''}".encode()
-        ).hexdigest()
-        pending.append(
-            {
-                "id": str(uuid4()),
-                "url": hit.url,
-                "canonical_key": canonical_key,
-                "platform": platform,
-                "platform_id": platform_id,
-                "source_provider": hit.provider,
-                "source_record_id": source_id,
-                "title": hit.title,
-                "snippet": hit.snippet,
-                "raw_payload_hash": payload_hash,
-                "community_likelihood": score,
-                "status": "normalized" if canonical_key else "new",
-                "discovered_at": now,
-            }
-        )
-        if len(pending) >= batch_size:
-            _flush_pending()
-            print(f"raw_candidates progress seen={stats['seen']} inserted={stats['inserted']}", flush=True)
-    _flush_pending()
-    return stats
 
 
 def _pending_community(session: Session, canonical_key: str) -> CommunityRow | None:

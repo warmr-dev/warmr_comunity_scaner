@@ -43,10 +43,6 @@ class Settings(BaseSettings):
     hive_max_detail_pages: int = Field(default=400, ge=20, le=5000)
     hive_exclude_discord_telegram: bool = True
 
-    # Persist every discovery hit into raw_candidates before community upsert.
-    save_raw_candidates: bool = True
-    raw_min_likelihood: float = Field(default=0.4, ge=0.0, le=1.0)
-
     llm_enabled: bool = False
     openai_api_key: str = ""
     llm_model: str = "gpt-4o-mini"
