@@ -73,6 +73,22 @@ _ZULIP_COMMUNITY = re.compile(
     r"(?:https?://)?([A-Za-z0-9-]+)\.zulipchat\.com(?:/|$|\?|[\"'\s<>])",
     re.I,
 )
+_MEETUP_GROUP = re.compile(
+    r"(?:https?://)?(?:www\.)?meetup\.com/([A-Za-z0-9_-]+)(?:/|$|\?|[\"'\s<>])",
+    re.I,
+)
+_GROUPS_IO = re.compile(
+    r"(?:https?://)?(?:www\.)?groups\.io/g/([A-Za-z0-9_-]+)(?:/|$|\?|[\"'\s<>])",
+    re.I,
+)
+_MIGHTY_NETWORK = re.compile(
+    r"(?:https?://)?(?:www\.)?mightynetworks\.com/(?:app/)?([A-Za-z0-9_-]+)(?:/|$|\?|[\"'\s<>])",
+    re.I,
+)
+_GENEVA_INVITE = re.compile(
+    r"(?:https?://)?(?:www\.)?geneva\.com/(?:invite|c)/([A-Za-z0-9_-]+)(?:/|$|\?|[\"'\s<>])",
+    re.I,
+)
 
 _BARE_SLACK = re.compile(r"^https?://(?:www\.)?slack\.com/?$", re.I)
 
@@ -223,14 +239,13 @@ _CIRCLE_BLOCKED = {
     "introduce-yourself",
 }
 
-# Platforms kept as useful Warmr community sources.
+# Platforms kept as useful Warmr community sources (no Telegram / Discord).
 ACTIVE_HARVEST_PLATFORMS = frozenset(
     {
         "slack",
         "whatsapp",
         "skool",
         "circle",
-        "telegram",
         "facebook",
         "linkedin",
         "reddit",
@@ -243,8 +258,13 @@ ACTIVE_HARVEST_PLATFORMS = frozenset(
         "github",
         "stackexchange",
         "disqus",
+        "meetup",
+        "groups_io",
     }
 )
+
+# Never upsert these, even if classified elsewhere.
+EXCLUDED_HARVEST_PLATFORMS = frozenset({"telegram", "discord"})
 
 _TELEGRAM_BLOCKED = {
     "share",
@@ -273,7 +293,7 @@ MIN_MEMBERS_FOR_UPSERT = 100
 # Datacenter IPs often cannot scrape invite landing pages for public counts.
 # Allow shaped invites without size; still reject known-too-small.
 SIZE_OPTIONAL_PLATFORMS = frozenset(
-    {"whatsapp", "slack", "skool", "circle", "telegram", "facebook", "linkedin"}
+    {"whatsapp", "slack", "skool", "circle", "facebook", "linkedin", "meetup", "groups_io", "mighty", "geneva"}
 )
 INVITE_SCAN_LIMIT = 500
 
@@ -413,7 +433,43 @@ def classify_invite_url(url: str) -> InviteMatch | None:
             rule="zulip_community",
         )
 
-    # Telegram / Discord still classified for legacy tooling/tests; upsert skips them.
+    m = _MEETUP_GROUP.search(url)
+    if m:
+        slug = m.group(1).lower()
+        if slug not in {"find", "cities", "topics", "login", "register", "apps", "pro"}:
+            return InviteMatch(
+                url=f"https://www.meetup.com/{m.group(1)}",
+                platform="meetup",
+                rule="meetup_group",
+            )
+
+    m = _GROUPS_IO.search(url)
+    if m:
+        return InviteMatch(
+            url=f"https://groups.io/g/{m.group(1)}",
+            platform="groups_io",
+            rule="groups_io",
+        )
+
+    m = _MIGHTY_NETWORK.search(url)
+    if m:
+        slug = m.group(1).lower()
+        if slug not in {"app", "login", "signup", "about", "pricing"}:
+            return InviteMatch(
+                url=f"https://www.mightynetworks.com/{m.group(1)}",
+                platform="mighty",
+                rule="mighty_network",
+            )
+
+    m = _GENEVA_INVITE.search(url)
+    if m:
+        return InviteMatch(
+            url=_ensure_https(m.group(0).split("?")[0]),
+            platform="geneva",
+            rule="geneva_invite",
+        )
+
+    # Telegram / Discord classified for tooling; harvest upsert skips them.
     m = _TELEGRAM.search(url)
     if m:
         return InviteMatch(url=_ensure_https(m.group(0)), platform="telegram", rule="telegram_invite")
@@ -467,6 +523,10 @@ def find_all_invites_in_text(text: str, *, limit: int = INVITE_SCAN_LIMIT) -> li
         _STACKEXCHANGE_CHAT,
         _MATRIX_ROOM,
         _ZULIP_COMMUNITY,
+        _MEETUP_GROUP,
+        _GROUPS_IO,
+        _MIGHTY_NETWORK,
+        _GENEVA_INVITE,
         _SLACK_WORKSPACE,
         _TELEGRAM,
         _DISCORD,

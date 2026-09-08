@@ -56,14 +56,17 @@ class QueryParams:
 
 
 # High-signal first: paid/pro communities that can reach medium/high value_tier.
+# No Telegram / Discord queries — those platforms are excluded from harvest upsert.
 HARVEST_TEMPLATES = [
     # Paid / membership (Warmr high-value)
     "paid community membership invite OR join founders OR operators",
-    "mastermind community invite slack OR skool OR circle",
+    "mastermind community invite slack OR skool OR circle OR meetup",
     '"$/mo" OR "$/month" skool community OR circle.so community',
     "founder community slack invite link",
     "CEO peer community invite OR membership",
     "professional community membership site:skool.com OR site:circle.so",
+    "online community membership join link -telegram -discord -t.me -discord.gg",
+    "community invite link join.slack.com OR skool.com OR circle.so OR chat.whatsapp.com",
     # Slack invites (priority)
     "inurl:join.slack.com/t/",
     "inurl:slack.com/shared_invite",
@@ -72,42 +75,43 @@ HARVEST_TEMPLATES = [
     "slack workspace invite link professionals OR founders",
     'site:notion.so "join.slack.com"',
     'site:github.com "join.slack.com/t/"',
-    # Skool / Circle
+    # Skool / Circle / Mighty / Geneva
     "site:skool.com",
     '"skool.com/" community OR membership OR join',
     "skool community paid OR membership",
     "site:circle.so",
     '"circle.so" community OR membership',
-    # Facebook / LinkedIn groups
+    "site:mightynetworks.com community OR join",
+    "geneva.com invite community",
+    # Facebook / LinkedIn / Reddit / Meetup / Groups.io
     "site:facebook.com/groups professional OR founders OR CPA OR lawyers",
     'inurl:facebook.com/groups/ "join" OR community',
     "site:linkedin.com/groups professional OR founders OR marketing",
     'inurl:linkedin.com/groups/',
+    "site:reddit.com/r/ professional OR founders community",
+    "site:meetup.com professional OR founders OR developers group",
+    "site:groups.io/g/",
     # Hive Index directory
-    "site:thehiveindex.com community slack OR circle OR facebook OR telegram",
+    "site:thehiveindex.com community slack OR circle OR facebook OR skool",
     "site:thehiveindex.com/communities/",
     # WhatsApp pro groups
     "inurl:chat.whatsapp.com",
     '"chat.whatsapp.com/" professionals OR founders OR CPA OR lawyers',
-    # Telegram groups (not channels)
-    "inurl:t.me/+ professional OR founders OR developers group chat",
-    '"t.me/+" invite group professionals -channel -subscribers',
-    'telegram group chat "members" founders OR developers OR marketing -channel',
 ]
 
 # Soft niche variants appended in harvest when a niche is set.
 HARVEST_NICHE_TEMPLATES = [
     'inurl:join.slack.com "{niche}"',
     '"{niche}" "join.slack.com/t/" invite OR workspace',
-    '"{niche}" paid community OR membership skool OR circle OR slack',
-    '"{niche}" mastermind invite OR community',
+    '"{niche}" paid community OR membership skool OR circle OR slack OR meetup',
+    '"{niche}" mastermind invite OR community -telegram -discord',
     'site:skool.com "{niche}"',
     'site:circle.so "{niche}"',
     'site:facebook.com/groups "{niche}"',
     'site:linkedin.com/groups "{niche}"',
+    'site:meetup.com "{niche}"',
     'site:thehiveindex.com "{niche}"',
     'inurl:chat.whatsapp.com "{niche}"',
-    '"{niche}" telegram group chat "t.me/" -channel',
 ]
 
 # Niche-first templates (used when HARVEST_MODE=false).
@@ -123,8 +127,8 @@ CHAT_TEMPLATES = [
     '"{niche}" circle.so community',
     'site:facebook.com/groups "{niche}"',
     'site:linkedin.com/groups "{niche}"',
+    'site:meetup.com "{niche}"',
     'inurl:chat.whatsapp.com "{niche}"',
-    '"{niche}" telegram group "t.me/" -channel',
     "{audience} {niche} slack community invite",
     "{audience} {niche} skool community",
     "{audience} {niche} facebook group",

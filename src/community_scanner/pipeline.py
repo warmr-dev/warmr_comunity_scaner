@@ -16,6 +16,7 @@ from community_scanner.discovery.base import resolve_geo
 from community_scanner.extract import heuristic_extract, llm_extract_from_text, merge_llm_result
 from community_scanner.invites import (
     ACTIVE_HARVEST_PLATFORMS,
+    EXCLUDED_HARVEST_PLATFORMS,
     MIN_MEMBERS_FOR_UPSERT,
     SIZE_OPTIONAL_PLATFORMS,
     classify_invite_url,
@@ -141,7 +142,12 @@ def _invites_from_hit(hit: DiscoveryHit, norm: NormalizedUrl | None = None):
         )
         if page_invite:
             invites = [page_invite]
-    return [i for i in invites if i.platform in ACTIVE_HARVEST_PLATFORMS]
+    return [
+        i
+        for i in invites
+        if i.platform in ACTIVE_HARVEST_PLATFORMS
+        and i.platform not in EXCLUDED_HARVEST_PLATFORMS
+    ]
 
 
 def _expand_discovery_invite_hits(hits: list[DiscoveryHit]) -> list[DiscoveryHit]:
@@ -208,7 +214,19 @@ def _invite_priority(hit: DiscoveryHit, norm: NormalizedUrl) -> int:
         )
     ):
         score += 30
-    if any(x in blob for x in ("slack", "whatsapp", "skool", "circle", "facebook", "linkedin", "telegram")):
+    if any(
+        x in blob
+        for x in (
+            "slack",
+            "whatsapp",
+            "skool",
+            "circle",
+            "facebook",
+            "linkedin",
+            "meetup",
+            "groups.io",
+        )
+    ):
         score += 10
     return score
 
@@ -225,6 +243,8 @@ def _item_from_invite(
 ) -> ExtractedCommunity | None:
     invite = classify_invite_url(invite_url)
     if not invite or invite.platform not in ACTIVE_HARVEST_PLATFORMS:
+        return None
+    if invite.platform in EXCLUDED_HARVEST_PLATFORMS:
         return None
     norm = normalize_url(invite.url)
     if norm.is_blocked:
@@ -317,6 +337,14 @@ def _upsert_invite_item(
     if not invite:
         item.raw_signals = {**item.raw_signals, "reject_reason": "not_invite_shape"}
         metrics.note_reject("not_invite_shape")
+        return
+    if invite.platform in EXCLUDED_HARVEST_PLATFORMS:
+        item.raw_signals = {**item.raw_signals, "reject_reason": f"excluded:{invite.platform}"}
+        metrics.note_reject(f"excluded:{invite.platform}")
+        return
+    if invite.platform not in ACTIVE_HARVEST_PLATFORMS:
+        item.raw_signals = {**item.raw_signals, "reject_reason": f"platform_skip:{invite.platform}"}
+        metrics.note_reject(f"platform_skip:{invite.platform}")
         return
     item.join_url = invite.url
 
