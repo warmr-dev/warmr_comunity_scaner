@@ -64,6 +64,36 @@ class DiscoveryResultRow(Base):
     )
 
 
+class RawCandidateRow(Base):
+    """Bulk discovery buffer — high-volume URLs before community upsert."""
+
+    __tablename__ = "raw_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_provider",
+            "source_record_id",
+            name="uq_raw_candidates_source_record",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_key: Mapped[str | None] = mapped_column(String(512), nullable=True, index=True)
+    platform: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    platform_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_provider: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    source_record_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    raw_payload_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    community_likelihood: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="new", index=True)
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PipelineRunRow(Base):
     __tablename__ = "pipeline_runs"
 

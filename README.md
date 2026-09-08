@@ -12,13 +12,68 @@ pip install -e ".[dev]"
 copy .env.example .env
 
 community-scanner init-db
-community-scanner run --niche business --queries 5 --per-query 10 --max-fetch 20
+community-scanner mass-fill --niche harvest --queries 20 --per-query 100 --max-fetch 500
 ```
+
+## Mass discovery (много комьюнити)
+
+По умолчанию: **Common Crawl + Hive Index** (без Discord/Telegram directory).
+
+```env
+DISCOVERY_PROVIDERS=commoncrawl,hive
+COMMONCRAWL_INDEX=latest
+COMMONCRAWL_MAX_PAGES_PER_PATTERN=30
+COMMONCRAWL_PAGE_SIZE=400
+HIVE_MAX_DETAIL_PAGES=1200
+HIVE_EXCLUDE_DISCORD_TELEGRAM=true
+SAVE_RAW_CANDIDATES=true
+HARVEST_MODE=true
+HARVEST_SKIP_ENRICH=true
+```
+
+### Railway 24/7 (бесплатные источники → ~100k)
+
+В Variables сервиса:
+
+```env
+SCANNER_MODE=mass
+DISCOVERY_PROVIDERS=commoncrawl,hive
+BUNDLE_SEARXNG=false
+HARVEST_MODE=true
+HARVEST_SKIP_ENRICH=true
+PIPE_QUERIES=80
+PIPE_PER_QUERY=100
+PIPE_MAX_FETCH=5000
+NICHE_LOOPS=0
+LOOP_PAUSE_SECONDS=30
+COMMONCRAWL_MAX_PAGES_PER_PATTERN=30
+COMMONCRAWL_PAGE_SIZE=400
+COMMONCRAWL_DELAY_MS=450
+HIVE_MAX_DETAIL_PAGES=1200
+```
+
+Нужен **volume** на `/app/data` (resumeKey + ротация CC-индексов между циклами). Затем redeploy образа с этим репо.
+
+Опционально добавить свежий SERP:
+
+```env
+DISCOVERY_PROVIDERS=commoncrawl,hive,dataforseo
+DATAFORSEO_LOGIN=...
+DATAFORSEO_PASSWORD=...
+```
+
+Сырые URL пишутся в `raw_candidates`, затем в `community_scanner`.
+
+```bash
+community-scanner mass-fill --queries 40 --per-query 100 --max-fetch 2000
+```
+
+Документация: [`docs/mass-discovery-research.md`](docs/mass-discovery-research.md) · [`docs/mass-discovery-implementation-backlog.md`](docs/mass-discovery-implementation-backlog.md)
 
 ## Discovery: harvest-first (invite links → filter later)
 
 ```env
-DISCOVERY_PROVIDERS=directory,searxng
+DISCOVERY_PROVIDERS=commoncrawl,hive
 HARVEST_MODE=true
 HARVEST_SKIP_ENRICH=true
 SEARXNG_BASE_URL=http://127.0.0.1:8080
@@ -32,7 +87,7 @@ PIPE_QUERIES=40
 PIPE_PER_QUERY=25
 ```
 
-`HARVEST_MODE=true` ищет широкие invite-запросы (`inurl:t.me/+`, `discord.gg`, …) и сохраняет invite-shaped URL с минимальным отсевом (только adult). Фильтр ниши/size/языка — позже.
+`HARVEST_MODE=true` сохраняет invite-shaped URL с минимальным отсевом (только adult). Фильтр ниши/size/языка — позже.
 
 ## Скорость fetch
 
@@ -55,9 +110,10 @@ FETCH_BATCH_SIZE=1000
 
 | Команда | Назначение |
 |---------|------------|
-| `discover` | SearXNG search → Redis queue |
-| `worker` | Параллельный fetch из очереди |
+| `mass-fill` | Common Crawl + Hive → raw_candidates + communities |
 | `run` | Discovery + fetch без очереди |
+| `discover` | Discovery → Redis queue |
+| `worker` | Параллельный fetch из очереди |
 
 ## Fetch
 

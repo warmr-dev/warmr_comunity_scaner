@@ -47,6 +47,42 @@ def cmd_discover(args: argparse.Namespace) -> None:
     print(json.dumps({"run_id": result.run_id, "metrics": result.metrics.as_dict()}, indent=2))
 
 
+def cmd_mass_fill(args: argparse.Namespace) -> None:
+    """High-volume fill via Common Crawl + Hive (and optional dataforseo/brave)."""
+    base = get_settings()
+    providers = base.discovery_provider_list
+    mass_ok = any(p in providers for p in ("commoncrawl", "hive", "dataforseo", "brave", "cc"))
+    updates = {
+        "harvest_mode": True,
+        "harvest_skip_enrich": True,
+        "save_raw_candidates": True,
+    }
+    if not mass_ok:
+        updates["discovery_providers"] = "commoncrawl,hive"
+    settings = base.model_copy(update=updates)
+
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    Session = make_session_factory(settings.database_url)
+    params = _run_params(args)
+    print(
+        f"mass-fill providers={settings.discovery_provider_list} "
+        f"queries={args.queries} per_query={args.per_query} max_fetch={args.max_fetch}",
+        flush=True,
+    )
+    with Session() as session:
+        result = run_pipeline(
+            session,
+            settings,
+            params,
+            query_limit=args.queries,
+            per_query=args.per_query,
+            max_fetch=args.max_fetch,
+            use_llm=False,
+        )
+    print(json.dumps({"run_id": result.run_id, "metrics": result.metrics.as_dict()}, indent=2))
+
+
 def cmd_discover_only(args: argparse.Namespace) -> None:
     settings = get_settings()
     if not settings.use_fetch_queue:
@@ -162,21 +198,33 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_disc = sub.add_parser("run", help="Discovery + parallel fetch + classify")
     p_disc.add_argument("--geo", default="USA")
-    p_disc.add_argument("--niche", default="business")
-    p_disc.add_argument("--audience", default="CPAs")
-    p_disc.add_argument("--queries", type=int, default=5)
-    p_disc.add_argument("--per-query", type=int, default=10)
-    p_disc.add_argument("--max-fetch", type=int, default=40)
+    p_disc.add_argument("--niche", default="harvest")
+    p_disc.add_argument("--audience", default="professionals")
+    p_disc.add_argument("--queries", type=int, default=20, help="Query/pattern budget multiplier")
+    p_disc.add_argument("--per-query", type=int, default=50, help="Hits per crawl/search provider")
+    p_disc.add_argument("--max-fetch", type=int, default=500, help="Max communities to upsert this run")
     p_disc.add_argument("--llm", action="store_true", help="Force LLM extract pass")
     p_disc.set_defaults(func=cmd_discover)
 
     p_disc_only = sub.add_parser("discover", help="Discovery only; enqueue URLs to Redis")
     p_disc_only.add_argument("--geo", default="USA")
-    p_disc_only.add_argument("--niche", default="business")
-    p_disc_only.add_argument("--audience", default="CPAs")
-    p_disc_only.add_argument("--queries", type=int, default=5)
-    p_disc_only.add_argument("--per-query", type=int, default=10)
+    p_disc_only.add_argument("--niche", default="harvest")
+    p_disc_only.add_argument("--audience", default="professionals")
+    p_disc_only.add_argument("--queries", type=int, default=20)
+    p_disc_only.add_argument("--per-query", type=int, default=50)
     p_disc_only.set_defaults(func=cmd_discover_only)
+
+    p_mass = sub.add_parser(
+        "mass-fill",
+        help="High-volume fill via Common Crawl + Hive (writes raw_candidates + communities)",
+    )
+    p_mass.add_argument("--geo", default="USA")
+    p_mass.add_argument("--niche", default="harvest")
+    p_mass.add_argument("--audience", default="professionals")
+    p_mass.add_argument("--queries", type=int, default=40, help="Pattern budget (pages * providers)")
+    p_mass.add_argument("--per-query", type=int, default=100, help="Max hits per crawl provider")
+    p_mass.add_argument("--max-fetch", type=int, default=2000)
+    p_mass.set_defaults(func=cmd_mass_fill)
 
     p_worker = sub.add_parser("worker", help="Process fetch queue from Redis")
     p_worker.add_argument("--max-items", type=int, default=None)

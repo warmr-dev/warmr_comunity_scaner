@@ -35,7 +35,7 @@ from community_scanner.models import (
 )
 from community_scanner.normalize import JUNK_HINTS, normalize_url
 from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
-from community_scanner.store import save_discovery_hits, upsert_community
+from community_scanner.store import save_discovery_hits, upsert_community, upsert_raw_candidates
 
 USER_AGENT = "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
 log = logging.getLogger(__name__)
@@ -517,6 +517,10 @@ class PipelineMetrics:
     skipped_junk: int = 0
     llm_calls: int = 0
     enqueued: int = 0
+    raw_candidates_seen: int = 0
+    raw_candidates_inserted: int = 0
+    raw_candidates_dup: int = 0
+    raw_candidates_skipped_low: int = 0
     reject_reasons: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -1003,6 +1007,17 @@ def run_discovery_only(
             query_limit=query_limit,
         )
         save_discovery_hits(session, hits, key_by_url)
+        if settings.save_raw_candidates:
+            raw_stats = upsert_raw_candidates(
+                session,
+                hits,
+                min_likelihood=settings.raw_min_likelihood,
+            )
+            metrics.raw_candidates_seen = raw_stats.get("seen", 0)
+            metrics.raw_candidates_inserted = raw_stats.get("inserted", 0)
+            metrics.raw_candidates_dup = raw_stats.get("dup", 0)
+            metrics.raw_candidates_skipped_low = raw_stats.get("skipped_low", 0)
+            session.commit()
 
         if enqueue_all and settings.use_fetch_queue and unique_candidates:
             scan_geo = resolve_geo(params.geo)
@@ -1101,6 +1116,17 @@ def run_pipeline(
             flush=True,
         )
         save_discovery_hits(session, hits, key_by_url)
+        if settings.save_raw_candidates:
+            raw_stats = upsert_raw_candidates(
+                session,
+                hits,
+                min_likelihood=settings.raw_min_likelihood,
+            )
+            metrics.raw_candidates_seen = raw_stats.get("seen", 0)
+            metrics.raw_candidates_inserted = raw_stats.get("inserted", 0)
+            metrics.raw_candidates_dup = raw_stats.get("dup", 0)
+            metrics.raw_candidates_skipped_low = raw_stats.get("skipped_low", 0)
+            print(f"raw_candidates {raw_stats}", flush=True)
 
         llm_on = settings.llm_enabled if use_llm is None else use_llm
         scan_geo = resolve_geo(params.geo)

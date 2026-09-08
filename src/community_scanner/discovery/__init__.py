@@ -6,8 +6,11 @@ from community_scanner.config import Settings
 from community_scanner.discovery.base import DiscoveryProvider, QueryParams, generate_queries
 from community_scanner.discovery.bing import BingHtmlProvider
 from community_scanner.discovery.brave import BraveSearchProvider
+from community_scanner.discovery.commoncrawl import CommonCrawlProvider
+from community_scanner.discovery.dataforseo import DataForSeoProvider
 from community_scanner.discovery.ddg import DuckDuckGoProvider
 from community_scanner.discovery.directory_crawler import DirectoryCrawlerProvider
+from community_scanner.discovery.hive import HiveIndexProvider
 from community_scanner.discovery.searxng import SearxngProvider
 from community_scanner.discovery.seeds import SeedsProvider
 from community_scanner.models import DiscoveryHit
@@ -43,11 +46,48 @@ def build_providers(settings: Settings) -> list[DiscoveryProvider]:
                 )
             )
         elif name in ("directory", "directories"):
+            # Mass mode should prefer hive/commoncrawl; directory still available
+            # but excludes Discord catalog hosts when hive_exclude is on.
+            sites = ("tgstat", "disboard", "discordservers")
+            if settings.hive_exclude_discord_telegram:
+                sites = ("tgstat",)  # still TG-heavy; prefer unset directory in mass mode
             providers.append(
                 DirectoryCrawlerProvider(
                     timeout=settings.http_timeout_seconds,
                     delay=max(0.2, settings.crawl_download_delay_seconds or 0.4),
                     max_channels_per_site=settings.directory_max_channels_per_site,
+                    sites=sites,
+                )
+            )
+        elif name in {"hive", "hiveindex", "hive_index"}:
+            providers.append(
+                HiveIndexProvider(
+                    timeout=max(20.0, settings.http_timeout_seconds),
+                    delay=max(0.2, settings.crawl_download_delay_seconds or 0.35),
+                    max_detail_pages=settings.hive_max_detail_pages,
+                    exclude_discord_telegram=settings.hive_exclude_discord_telegram,
+                )
+            )
+        elif name in {"commoncrawl", "cc", "common_crawl"}:
+            providers.append(
+                CommonCrawlProvider(
+                    index=settings.commoncrawl_index,
+                    index_offset=settings.commoncrawl_index_offset,
+                    timeout=max(45.0, settings.http_timeout_seconds),
+                    delay_ms=settings.commoncrawl_delay_ms,
+                    page_size=settings.commoncrawl_page_size,
+                    max_pages_per_pattern=settings.commoncrawl_max_pages_per_pattern,
+                    min_likelihood=settings.commoncrawl_min_likelihood,
+                    persist_resume=settings.commoncrawl_persist_resume,
+                )
+            )
+        elif name in {"dataforseo", "dfs"}:
+            providers.append(
+                DataForSeoProvider(
+                    login=settings.dataforseo_login,
+                    password=settings.dataforseo_password,
+                    timeout=max(60.0, settings.http_timeout_seconds),
+                    mode=settings.dataforseo_mode,
                 )
             )
         elif name == "searxng":
@@ -76,7 +116,8 @@ def _crawl_safe(provider: DiscoveryProvider, params: QueryParams, count: int) ->
         return []
     try:
         return crawl(params, count=count)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
+        print(f"crawl error [{provider.name}] {exc!s}"[:240], flush=True)
         return []
 
 
@@ -92,7 +133,7 @@ def run_discovery(
     if not providers:
         raise RuntimeError(
             "No discovery providers configured. "
-            "Set DISCOVERY_PROVIDERS=ddg,searxng,directory, or brave."
+            "Set DISCOVERY_PROVIDERS=commoncrawl,hive,dataforseo,brave,searxng"
         )
 
     hits: list[DiscoveryHit] = []
@@ -107,7 +148,7 @@ def run_discovery(
         delay = 0.6
 
     for provider in crawl_providers:
-        print(f"directory crawl start [{provider.name}] budget={budget}", flush=True)
+        print(f"crawl start [{provider.name}] budget={budget}", flush=True)
         crawled = 0
         for hit in _crawl_safe(provider, params, budget):
             crawled += 1
@@ -116,7 +157,7 @@ def run_discovery(
             seen_urls.add(hit.url)
             hits.append(hit)
         print(
-            f"directory crawl done [{provider.name}] raw={crawled} unique_total={len(hits)}",
+            f"crawl done [{provider.name}] raw={crawled} unique_total={len(hits)}",
             flush=True,
         )
 
@@ -139,7 +180,6 @@ def run_discovery(
         flush=True,
     )
 
-    # Sequential when concurrency=1 (recommended): one query at a time with pause.
     if workers <= 1:
         for i, (provider, query) in enumerate(tasks, start=1):
             batch = _search_safe(provider, query, per_query)

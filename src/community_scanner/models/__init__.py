@@ -1,4 +1,10 @@
-from community_scanner.models.db import Base, CommunityRow, DiscoveryResultRow, PipelineRunRow
+from community_scanner.models.db import (
+    Base,
+    CommunityRow,
+    DiscoveryResultRow,
+    PipelineRunRow,
+    RawCandidateRow,
+)
 from community_scanner.models.schemas import (
     AccessStatus,
     DiscoveryHit,
@@ -21,6 +27,7 @@ __all__ = [
     "NormalizedUrl",
     "PipelineRunRow",
     "Platform",
+    "RawCandidateRow",
     "SyncStatus",
     "ValueTier",
 ]

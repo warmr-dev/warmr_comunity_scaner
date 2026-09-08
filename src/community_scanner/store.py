@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -7,7 +8,15 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from community_scanner.models import CommunityRow, DiscoveryHit, DiscoveryResultRow, ExtractedCommunity
+from community_scanner.likelihood import community_likelihood
+from community_scanner.models import (
+    CommunityRow,
+    DiscoveryHit,
+    DiscoveryResultRow,
+    ExtractedCommunity,
+    RawCandidateRow,
+)
+from community_scanner.normalize import normalize_url
 
 
 def make_engine(database_url: str):
@@ -48,6 +57,79 @@ def save_discovery_hits(session: Session, hits: list[DiscoveryHit], canonical_ke
         )
     session.add_all(rows)
     return len(rows)
+
+
+def _source_record_id(hit: DiscoveryHit, canonical_key: str | None) -> str:
+    if canonical_key:
+        return canonical_key[:512]
+    digest = hashlib.sha1(hit.url.encode("utf-8", errors="ignore")).hexdigest()
+    return f"url:{digest}"
+
+
+def upsert_raw_candidates(
+    session: Session,
+    hits: list[DiscoveryHit],
+    *,
+    min_likelihood: float = 0.0,
+) -> dict[str, int]:
+    """Persist bulk discovery hits into raw_candidates. Returns counters."""
+    stats = {"seen": 0, "inserted": 0, "skipped_low": 0, "dup": 0}
+    for hit in hits:
+        stats["seen"] += 1
+        if not hit.url:
+            continue
+        score = community_likelihood(hit.url, title=hit.title, snippet=hit.snippet)
+        if score < min_likelihood:
+            stats["skipped_low"] += 1
+            continue
+        norm = normalize_url(hit.url)
+        canonical_key = None if norm.is_blocked else norm.canonical_key
+        platform = None if norm.is_blocked else norm.platform.value
+        platform_id = None if norm.is_blocked else norm.platform_id
+        source_id = _source_record_id(hit, canonical_key)
+        payload_hash = hashlib.sha1(
+            f"{hit.provider}|{hit.url}|{hit.query or ''}".encode()
+        ).hexdigest()
+
+        existing = session.scalar(
+            select(RawCandidateRow).where(
+                RawCandidateRow.source_provider == hit.provider,
+                RawCandidateRow.source_record_id == source_id,
+            )
+        )
+        if existing is not None:
+            existing.community_likelihood = max(existing.community_likelihood, score)
+            existing.title = hit.title or existing.title
+            existing.snippet = hit.snippet or existing.snippet
+            if canonical_key and not existing.canonical_key:
+                existing.canonical_key = canonical_key
+                existing.platform = platform
+                existing.platform_id = platform_id
+            stats["dup"] += 1
+            continue
+
+        row = RawCandidateRow(
+            url=hit.url,
+            canonical_key=canonical_key,
+            platform=platform,
+            platform_id=platform_id,
+            source_provider=hit.provider,
+            source_record_id=source_id,
+            title=hit.title,
+            snippet=hit.snippet,
+            raw_payload_hash=payload_hash,
+            community_likelihood=score,
+            status="normalized" if canonical_key else "new",
+            discovered_at=datetime.now(timezone.utc),
+        )
+        try:
+            with session.begin_nested():
+                session.add(row)
+                session.flush()
+            stats["inserted"] += 1
+        except IntegrityError:
+            stats["dup"] += 1
+    return stats
 
 
 def _pending_community(session: Session, canonical_key: str) -> CommunityRow | None:

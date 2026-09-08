@@ -17,14 +17,35 @@ class Settings(BaseSettings):
     use_fetch_queue: bool = False
 
     searxng_base_url: str = "http://127.0.0.1:8080"
-    # Primary: directory catalogs + searxng web search.
-    discovery_providers: str = "directory,searxng"
+    # Mass discovery default: Common Crawl + Hive (no Discord/Telegram directory).
+    discovery_providers: str = "commoncrawl,hive"
     discovery_concurrency: int = Field(default=2, ge=1, le=50)
     brave_search_api_key: str = ""
     brave_country: str = "us"
     brave_search_lang: str = "en"
     # Hard cap on Brave API calls per process ($5/1k → 200 ≈ $1). 0 = unlimited.
     brave_max_requests: int = Field(default=0, ge=0, le=1_000_000)
+
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+    dataforseo_mode: str = "live"  # live | standard | priority
+
+    commoncrawl_index: str = "latest"  # latest | rotate | CC-MAIN-YYYY-WW | cdx URL
+    # When index=latest/rotate: pick collinfo[offset % n] so each Railway cycle hits a new crawl.
+    commoncrawl_index_offset: int = Field(default=0, ge=0, le=10_000)
+    commoncrawl_delay_ms: int = Field(default=500, ge=0, le=10_000)
+    commoncrawl_page_size: int = Field(default=400, ge=10, le=1000)
+    commoncrawl_max_pages_per_pattern: int = Field(default=25, ge=0, le=500)
+    commoncrawl_min_likelihood: float = Field(default=0.45, ge=0.0, le=1.0)
+    # Persist CDX resumeKey under SCANNER_DATA_DIR so 24/7 loops keep paging forward.
+    commoncrawl_persist_resume: bool = True
+
+    hive_max_detail_pages: int = Field(default=400, ge=20, le=5000)
+    hive_exclude_discord_telegram: bool = True
+
+    # Persist every discovery hit into raw_candidates before community upsert.
+    save_raw_candidates: bool = True
+    raw_min_likelihood: float = Field(default=0.4, ge=0.0, le=1.0)
 
     llm_enabled: bool = False
     openai_api_key: str = ""

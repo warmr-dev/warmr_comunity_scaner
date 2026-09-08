@@ -3,19 +3,23 @@ set -eu
 
 cd /app
 
-: "${SCANNER_MODE:=run}"
-: "${DISCOVERY_PROVIDERS:=directory,searxng}"
+: "${SCANNER_MODE:=mass}"
+: "${DISCOVERY_PROVIDERS:=commoncrawl,hive}"
 : "${SYNC_VALUE_TIERS:=high,medium,low}"
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"
 : "${USE_FETCH_QUEUE:=false}"
-: "${NICHE_PAUSE_SECONDS:=3}"
+: "${NICHE_PAUSE_SECONDS:=2}"
 : "${PIPE_NICHES:=auto}"
-: "${PIPE_QUERIES:=24}"
-: "${PIPE_PER_QUERY:=25}"
-: "${PIPE_MAX_FETCH:=80}"
-: "${NICHE_LOOPS:=1}"
-: "${LOOP_PAUSE_SECONDS:=60}"
+: "${PIPE_QUERIES:=60}"
+: "${PIPE_PER_QUERY:=80}"
+: "${PIPE_MAX_FETCH:=3000}"
+: "${NICHE_LOOPS:=0}"
+: "${LOOP_PAUSE_SECONDS:=45}"
+: "${SCANNER_DATA_DIR:=/app/data}"
+
+mkdir -p "$SCANNER_DATA_DIR"
+OFFSET_FILE="${SCANNER_DATA_DIR}/cc_index_offset"
 
 resolve_niches() {
   if [ "$PIPE_NICHES" != "auto" ] && [ -n "$PIPE_NICHES" ]; then
@@ -40,6 +44,19 @@ resolve_niches() {
 
   # Fallback single niche
   echo "${PIPE_NICHE:-business}"
+}
+
+bump_cc_offset() {
+  offset=0
+  if [ -f "$OFFSET_FILE" ]; then
+    offset=$(tr -d ' \r\n' < "$OFFSET_FILE" || echo 0)
+  fi
+  case "$offset" in
+    ''|*[!0-9]*) offset=0 ;;
+  esac
+  export COMMONCRAWL_INDEX_OFFSET="$offset"
+  echo "COMMONCRAWL_INDEX_OFFSET=${COMMONCRAWL_INDEX_OFFSET}"
+  echo $((offset + 1)) > "$OFFSET_FILE"
 }
 
 NICHES="$(resolve_niches)"
@@ -92,7 +109,45 @@ run_all_niches() {
   done
 }
 
+run_mass_cycle() {
+  bump_cc_offset
+  echo "=== mass-fill harvest geo=${GEO_ARGS} queries=${QUERIES_ARGS} per_query=${PER_QUERY_ARGS} max_fetch=${MAX_FETCH_ARGS} ==="
+  community-scanner mass-fill \
+    --niche harvest \
+    --geo "$GEO_ARGS" \
+    --audience "$AUDIENCE_ARGS" \
+    --queries "$QUERIES_ARGS" \
+    --per-query "$PER_QUERY_ARGS" \
+    --max-fetch "$MAX_FETCH_ARGS"
+}
+
 case "$SCANNER_MODE" in
+  mass|mass-fill|harvest)
+    # Fast free-tier volume: Common Crawl + Hive, rotate CC index each cycle.
+    loop=1
+    while :; do
+      if [ "$NICHE_LOOPS" = "0" ]; then
+        echo "=== mass loop ${loop}/∞ ==="
+      else
+        if [ "$loop" -gt "$NICHE_LOOPS" ]; then
+          break
+        fi
+        echo "=== mass loop ${loop}/${NICHE_LOOPS} ==="
+      fi
+      if ! run_mass_cycle; then
+        echo "WARN: mass-fill cycle failed; continuing after pause"
+      fi
+      if [ "$NICHE_LOOPS" != "0" ]; then
+        loop=$((loop + 1))
+        continue
+      fi
+      if [ "$LOOP_PAUSE_SECONDS" -gt 0 ]; then
+        echo "mass cycle ${loop} done; pause ${LOOP_PAUSE_SECONDS}s before next cycle"
+        sleep "$LOOP_PAUSE_SECONDS"
+      fi
+      loop=$((loop + 1))
+    done
+    ;;
   discovery|run|full)
     loop=1
     while :; do
@@ -123,7 +178,7 @@ case "$SCANNER_MODE" in
     community-scanner worker --max-items "$WORKER_MAX_ITEMS_ARGS"
     ;;
   *)
-    echo "Unknown SCANNER_MODE=$SCANNER_MODE (use full|discovery|worker|run)" >&2
+    echo "Unknown SCANNER_MODE=$SCANNER_MODE (use mass|full|discovery|worker|run)" >&2
     exit 1
     ;;
 esac
