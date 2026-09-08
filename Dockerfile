@@ -34,14 +34,14 @@ RUN git clone --depth 1 https://github.com/searxng/searxng.git /opt/searxng \
 COPY docker/searxng/settings.yml /etc/searxng/settings.yml
 
 ENV SCANNER_DATA_DIR=/app/data \
-    BUNDLE_SEARXNG=false \
+    BUNDLE_SEARXNG=true \
     SEARXNG_BASE_URL=http://127.0.0.1:8080 \
     SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml \
     SEARXNG_BIND_ADDRESS=127.0.0.1 \
     SEARXNG_PORT=8080 \
     USE_FETCH_QUEUE=false \
     SCANNER_MODE=mass \
-    DISCOVERY_PROVIDERS=commoncrawl,hive \
+    DISCOVERY_PROVIDERS=commoncrawl,hive,searxng \
     HARVEST_MODE=true \
     HARVEST_SKIP_ENRICH=true \
     PYTHONPATH=/opt/searxng

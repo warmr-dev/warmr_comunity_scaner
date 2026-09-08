@@ -4,7 +4,7 @@ set -eu
 cd /app
 
 : "${SCANNER_MODE:=mass}"
-: "${DISCOVERY_PROVIDERS:=commoncrawl,hive}"
+: "${DISCOVERY_PROVIDERS:=commoncrawl,hive,searxng}"
 : "${SYNC_VALUE_TIERS:=high,medium,low}"
 : "${WARMR_TABLE_NAME:=community_scanner}"
 : "${WARMR_UPSERT_KEY:=canonical_key}"

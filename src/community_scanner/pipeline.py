@@ -1062,8 +1062,15 @@ def run_mass_pipeline(
     per_query: int = 100,
     max_fetch: int = 5000,
 ) -> PipelineResult:
-    """High-volume free discovery: persist after each crawl provider (no HTTP enrich)."""
-    from community_scanner.discovery import build_providers, _crawl_safe
+    """High-volume free discovery: persist after each provider (no HTTP enrich)."""
+    import time
+
+    from community_scanner.discovery import (
+        _crawl_safe,
+        _search_safe,
+        build_providers,
+        generate_queries,
+    )
 
     metrics = PipelineMetrics(queries_estimated=query_limit)
     run_id = _start_run(session)
@@ -1076,9 +1083,14 @@ def run_mass_pipeline(
             flush=True,
         )
         providers = build_providers(settings)
+        if not providers:
+            raise RuntimeError(
+                "mass pipeline needs providers "
+                "(commoncrawl,hive,searxng,...)"
+            )
+
         crawl_providers = [p for p in providers if callable(getattr(p, "crawl", None))]
-        if not crawl_providers:
-            raise RuntimeError("mass pipeline needs crawl providers (commoncrawl,hive,...)")
+        search_providers = [p for p in providers if p not in crawl_providers]
 
         for provider in crawl_providers:
             print(f"mass provider start [{provider.name}] budget={budget}", flush=True)
@@ -1092,6 +1104,56 @@ def run_mass_pipeline(
                 params=params,
                 max_fetch=max_fetch,
             )
+
+        if search_providers:
+            harvest = bool(settings.harvest_mode)
+            queries = generate_queries(params, limit=query_limit, harvest=harvest)
+            delay = max(0.5, float(settings.crawl_download_delay_seconds or 0.0) or 0.6)
+            print(
+                f"mass search start providers={[p.name for p in search_providers]} "
+                f"queries={len(queries)} per_query={per_query} delay={delay}",
+                flush=True,
+            )
+            batch_hits: list[DiscoveryHit] = []
+            seen_urls: set[str] = set()
+            for i, query in enumerate(queries, start=1):
+                for provider in search_providers:
+                    found = _search_safe(provider, query, per_query)
+                    kept = 0
+                    for hit in found:
+                        key = (hit.url or "").lower().rstrip("/")
+                        if not key or key in seen_urls:
+                            continue
+                        seen_urls.add(key)
+                        batch_hits.append(hit)
+                        kept += 1
+                    print(
+                        f"mass search {i}/{len(queries)} [{provider.name}] "
+                        f"+{kept} total_batch={len(batch_hits)} q={query[:80]!r}",
+                        flush=True,
+                    )
+                    if delay > 0:
+                        time.sleep(delay)
+                # Flush periodically so Bing bans / crashes don't lose the cycle.
+                if i % 10 == 0 and batch_hits:
+                    _persist_discovery_batch(
+                        session,
+                        settings,
+                        batch_hits,
+                        metrics,
+                        params=params,
+                        max_fetch=max_fetch,
+                    )
+                    batch_hits = []
+            if batch_hits:
+                _persist_discovery_batch(
+                    session,
+                    settings,
+                    batch_hits,
+                    metrics,
+                    params=params,
+                    max_fetch=max_fetch,
+                )
 
         _finalize_run(session, run_id, status="success", metrics=metrics)
         print(f"mass pipeline done run_id={run_id} metrics={metrics.as_dict()}", flush=True)
