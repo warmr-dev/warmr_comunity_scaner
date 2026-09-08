@@ -77,6 +77,22 @@ def save_discovery_hits(
     return written
 
 
+def existing_canonical_keys(session: Session, keys: list[str]) -> set[str]:
+    """Return which of the given canonical_keys already exist in community_scanner."""
+    if not keys:
+        return set()
+    found: set[str] = set()
+    # Chunk IN queries to stay under parameter limits.
+    chunk_size = 500
+    for i in range(0, len(keys), chunk_size):
+        chunk = keys[i : i + chunk_size]
+        rows = session.scalars(
+            select(CommunityRow.canonical_key).where(CommunityRow.canonical_key.in_(chunk))
+        ).all()
+        found.update(rows)
+    return found
+
+
 def _pending_community(session: Session, canonical_key: str) -> CommunityRow | None:
     """Return an unflushed insert in this session (same transaction duplicate guard)."""
     for obj in session.new:
@@ -85,8 +101,16 @@ def _pending_community(session: Session, canonical_key: str) -> CommunityRow | N
     return None
 
 
-def upsert_community(session: Session, item: ExtractedCommunity) -> tuple[CommunityRow, bool, bool]:
-    """Returns (row, created, changed)."""
+def upsert_community(
+    session: Session,
+    item: ExtractedCommunity,
+    *,
+    insert_only: bool = False,
+) -> tuple[CommunityRow, bool, bool]:
+    """Returns (row, created, changed).
+
+    insert_only=True: never update existing rows (skip duplicates entirely).
+    """
     existing = _pending_community(session, item.canonical_key)
     if existing is None:
         existing = session.scalar(
@@ -94,67 +118,72 @@ def upsert_community(session: Session, item: ExtractedCommunity) -> tuple[Commun
         )
     now = datetime.now(timezone.utc)
 
-    if existing is None:
-        row = CommunityRow(
-            canonical_key=item.canonical_key,
-            canonical_domain=item.canonical_domain,
-            platform=item.platform.value,
-            platform_id=item.platform_id,
-            website=item.website,
-            name=item.name,
-            niche=item.niche,
-            audience=item.audience,
-            geo=item.geo,
-            join_url=item.join_url,
-            price_text=item.price_text,
-            price_amount=item.price_amount,
-            currency=item.currency,
-            size_text=item.size_text,
-            size_members=item.size_members,
-            contacts=item.contacts,
-            access_status=item.access_status.value,
-            value_score=item.value_score,
-            value_tier=item.value_tier.value,
-            relevance_score=item.relevance_score,
-            source_queries=item.source_queries,
-            raw_signals=item.raw_signals,
-            content_hash=item.content_hash,
-            sync_status="pending",
-            first_seen_at=now,
-            last_seen_at=now,
-            last_changed_at=now,
-        )
-        try:
-            with session.begin_nested():
-                session.add(row)
-                session.flush()
-            return row, True, True
-        except IntegrityError:
-            # Parallel workers may race on the same canonical_key.
-            existing = session.scalar(
-                select(CommunityRow).where(CommunityRow.canonical_key == item.canonical_key)
-            )
-            if existing is None:
-                raise
-            now = datetime.now(timezone.utc)
+    if existing is not None:
+        if insert_only:
+            return existing, False, False
+        changed = False
+        for field in CHANGED_FIELDS:
+            new_val = getattr(item, field)
+            if hasattr(new_val, "value"):
+                new_val = new_val.value
+            old_val = getattr(existing, field)
+            if new_val != old_val and new_val is not None:
+                setattr(existing, field, new_val)
+                changed = True
 
-    changed = False
-    for field in CHANGED_FIELDS:
-        new_val = getattr(item, field)
-        if hasattr(new_val, "value"):
-            new_val = new_val.value
-        old_val = getattr(existing, field)
-        if new_val != old_val and new_val is not None:
-            setattr(existing, field, new_val)
+        existing.last_seen_at = now
+        existing.raw_signals = item.raw_signals
+        existing.source_queries = list({*existing.source_queries, *item.source_queries})
+        if item.content_hash and item.content_hash != existing.content_hash:
+            existing.content_hash = item.content_hash
             changed = True
+        if changed:
+            existing.last_changed_at = now
+            existing.sync_status = "pending"
+        return existing, False, changed
 
-    existing.last_seen_at = now
-    existing.raw_signals = item.raw_signals
-    existing.source_queries = list({*existing.source_queries, *item.source_queries})
-    if item.content_hash and item.content_hash != existing.content_hash:
-        existing.content_hash = item.content_hash
-        changed = True
-    if changed:
-        existing.last_changed_at = now
-        existing.sync_status = "pending"
-    return existing, False, changed
+    row = CommunityRow(
+        canonical_key=item.canonical_key,
+        canonical_domain=item.canonical_domain,
+        platform=item.platform.value,
+        platform_id=item.platform_id,
+        website=item.website,
+        name=item.name,
+        niche=item.niche,
+        audience=item.audience,
+        geo=item.geo,
+        join_url=item.join_url,
+        price_text=item.price_text,
+        price_amount=item.price_amount,
+        currency=item.currency,
+        size_text=item.size_text,
+        size_members=item.size_members,
+        contacts=item.contacts,
+        access_status=item.access_status.value,
+        value_score=item.value_score,
+        value_tier=item.value_tier.value,
+        relevance_score=item.relevance_score,
+        source_queries=item.source_queries,
+        raw_signals=item.raw_signals,
+        content_hash=item.content_hash,
+        sync_status="pending",
+        first_seen_at=now,
+        last_seen_at=now,
+        last_changed_at=now,
+    )
+    try:
+        with session.begin_nested():
+            session.add(row)
+            session.flush()
+        return row, True, True
+    except IntegrityError:
+        # Parallel workers / unique race: treat as duplicate, do not update when insert_only.
+        existing = session.scalar(
+            select(CommunityRow).where(CommunityRow.canonical_key == item.canonical_key)
+        )
+        if existing is None:
+            raise
+        if insert_only:
+            return existing, False, False
+        existing.last_seen_at = datetime.now(timezone.utc)
+        return existing, False, False

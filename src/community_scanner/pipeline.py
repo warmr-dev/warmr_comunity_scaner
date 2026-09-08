@@ -35,7 +35,7 @@ from community_scanner.models import (
 )
 from community_scanner.normalize import JUNK_HINTS, normalize_url
 from community_scanner.queue import enqueue_fetch_jobs, fetch_job_from_candidate
-from community_scanner.store import save_discovery_hits, upsert_community
+from community_scanner.store import existing_canonical_keys, save_discovery_hits, upsert_community
 
 USER_AGENT = "WarmrCommunityScanner/0.1 (+https://github.com/warmr-dev/warmr_comunity_scaner)"
 log = logging.getLogger(__name__)
@@ -284,6 +284,7 @@ def _upsert_invite_item(
     *,
     harvest: bool = False,
     skip_enrich: bool = False,
+    insert_only: bool = False,
 ) -> None:
     if not item.join_url:
         metrics.note_reject("missing_join_url")
@@ -412,7 +413,7 @@ def _upsert_invite_item(
                 "classify_would_reject": True,
             }
 
-    _, created, changed = upsert_community(session, item)
+    _, created, changed = upsert_community(session, item, insert_only=insert_only)
     if created:
         metrics.upserted_new += 1
     elif changed:
@@ -801,13 +802,23 @@ def apply_serp_stubs(
     niche: str | None = None,
     harvest: bool = False,
     skip_enrich: bool = False,
+    insert_only: bool = False,
+    known_keys: set[str] | None = None,
 ) -> None:
     total = len(candidates)
     print(
-        f"serp stubs start candidates={total} harvest={harvest} skip_enrich={skip_enrich}",
+        f"serp stubs start candidates={total} harvest={harvest} "
+        f"skip_enrich={skip_enrich} insert_only={insert_only}",
         flush=True,
     )
+    known = known_keys or set()
     for idx, (hit, norm) in enumerate(candidates, start=1):
+        if norm.canonical_key in known:
+            metrics.upserted_unchanged += 1
+            if idx == 1 or idx == total or idx % 100 == 0:
+                print(f"serp stubs {idx}/{total} skip_existing", flush=True)
+            continue
+
         invites = _invites_from_hit(hit, norm)
 
         if not invites:
@@ -837,13 +848,19 @@ def apply_serp_stubs(
             )
             if item is None:
                 continue
+            if item.canonical_key in known:
+                metrics.upserted_unchanged += 1
+                continue
             _upsert_invite_item(
                 session,
                 item,
                 metrics,
                 harvest=harvest,
                 skip_enrich=skip_enrich,
+                insert_only=insert_only,
             )
+            if insert_only:
+                known.add(item.canonical_key)
         if idx == 1 or idx == total or idx % 50 == 0:
             print(
                 f"serp stubs {idx}/{total} invites={len(invites)} "
@@ -1005,15 +1022,28 @@ def _persist_discovery_batch(
 
     harvest = bool(settings.harvest_mode)
     skip_enrich = bool(harvest and settings.harvest_skip_enrich)
+    insert_only = bool(skip_enrich)
     scan_geo = resolve_geo(params.geo)
+
+    cand_keys = [norm.canonical_key for _, norm in unique_candidates]
+    known = existing_canonical_keys(session, cand_keys)
+    fresh = [(h, n) for h, n in unique_candidates if n.canonical_key not in known]
+    print(
+        f"community dedupe known={len(known)} fresh={len(fresh)} "
+        f"of={len(unique_candidates)} insert_only={insert_only}",
+        flush=True,
+    )
+
     apply_serp_stubs(
         session,
-        unique_candidates[:max_fetch],
+        fresh[:max_fetch],
         metrics,
         scan_geo=scan_geo,
         niche=params.niche,
         harvest=harvest,
         skip_enrich=skip_enrich,
+        insert_only=insert_only,
+        known_keys=known,
     )
     session.commit()
     print(
@@ -1210,16 +1240,28 @@ def run_pipeline(
         scan_geo = resolve_geo(params.geo)
         harvest = bool(settings.harvest_mode)
         skip_enrich = bool(harvest and settings.harvest_skip_enrich)
+        insert_only = bool(skip_enrich)
+
+        cand_keys = [norm.canonical_key for _, norm in unique_candidates]
+        known = existing_canonical_keys(session, cand_keys)
+        fresh = [(h, n) for h, n in unique_candidates if n.canonical_key not in known]
+        print(
+            f"community dedupe known={len(known)} fresh={len(fresh)} "
+            f"of={len(unique_candidates)}",
+            flush=True,
+        )
 
         # Volume: write every unique SERP hit immediately, then enrich via fetch.
         apply_serp_stubs(
             session,
-            unique_candidates[:max_fetch],
+            fresh[:max_fetch],
             metrics,
             scan_geo=scan_geo,
             niche=params.niche,
             harvest=harvest,
             skip_enrich=skip_enrich,
+            insert_only=insert_only,
+            known_keys=known,
         )
         session.commit()
         print("serp stubs committed", flush=True)

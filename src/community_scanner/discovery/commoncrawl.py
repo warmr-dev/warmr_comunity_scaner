@@ -146,6 +146,43 @@ def _save_resume_state(state: dict) -> None:
     path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _collinfo_cache_path() -> Path:
+    return data_dir() / "commoncrawl_collinfo.json"
+
+
+def _load_collinfo(client: httpx.Client) -> list[dict]:
+    """Fetch collinfo with retries; fall back to on-disk cache."""
+    cache = _collinfo_cache_path()
+    last_err: Exception | None = None
+    for attempt in range(1, 6):
+        try:
+            resp = client.get(COLLINFO_URL)
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, list) or not data:
+                raise RuntimeError("Common Crawl collinfo.json returned empty list")
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                cache.write_text(json.dumps(data), encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                pass
+            return data
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            wait = attempt * 1.8
+            print(f"commoncrawl collinfo attempt={attempt} err={exc!s} sleep={wait:.1f}s", flush=True)
+            time.sleep(wait)
+    if cache.exists():
+        try:
+            data = json.loads(cache.read_text(encoding="utf-8"))
+            if isinstance(data, list) and data:
+                print(f"commoncrawl collinfo using cache entries={len(data)}", flush=True)
+                return data
+        except Exception:  # noqa: BLE001
+            pass
+    raise RuntimeError(f"Common Crawl collinfo failed: {last_err}")
+
+
 class CommonCrawlProvider(DiscoveryProvider):
     """Pull community-shaped URLs from Common Crawl CDX index."""
 
@@ -176,6 +213,14 @@ class CommonCrawlProvider(DiscoveryProvider):
         self._cdx_api: str | None = None
         self._index_id: str | None = None
 
+    def _pick_from_collinfo(self, data: list[dict], offset: int) -> tuple[str, str]:
+        pick = data[offset % len(data)]
+        cdx = pick.get("cdx-api")
+        if not cdx:
+            raise RuntimeError("Common Crawl collinfo missing cdx-api")
+        index_id = str(pick.get("id") or cdx)
+        return index_id, cdx
+
     def _resolve_cdx_api(self, client: httpx.Client) -> str:
         if self._cdx_api:
             return self._cdx_api
@@ -188,23 +233,23 @@ class CommonCrawlProvider(DiscoveryProvider):
             self._index_id = self.index
             return self._cdx_api
 
-        resp = client.get(COLLINFO_URL)
-        resp.raise_for_status()
-        data = resp.json()
-        if not data:
-            raise RuntimeError("Common Crawl collinfo.json returned empty list")
-        # Rotate across historical indexes so 24/7 loops keep finding new URLs.
-        pick = data[self.index_offset % len(data)]
-        cdx = pick.get("cdx-api")
-        if not cdx:
-            raise RuntimeError("Common Crawl collinfo missing cdx-api")
-        self._cdx_api = cdx
-        self._index_id = str(pick.get("id") or cdx)
-        print(
-            f"commoncrawl using index={self._index_id} offset={self.index_offset} cdx={cdx}",
-            flush=True,
-        )
-        return cdx
+        data = _load_collinfo(client)
+        # Prefer requested offset; on bad entry try a few neighbors.
+        last_err: Exception | None = None
+        for bump in range(0, min(8, len(data))):
+            try:
+                index_id, cdx = self._pick_from_collinfo(data, self.index_offset + bump)
+                self._cdx_api = cdx
+                self._index_id = index_id
+                print(
+                    f"commoncrawl using index={self._index_id} "
+                    f"offset={self.index_offset + bump} cdx={cdx}",
+                    flush=True,
+                )
+                return cdx
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+        raise RuntimeError(f"Common Crawl index pick failed: {last_err}")
 
     def _fetch_page(
         self,
