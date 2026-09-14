@@ -1,0 +1,100 @@
+{
+  "old_reddit": {
+    "status": 200,
+    "error": null,
+    "bytes": 351917,
+    "ok": false,
+    "preview": "\n    <!DOCTYPE html>\n    <html lang=\"en-US\" class=\"theme-beta\" dir=\"ltr\" device=\"desktop\">\n      <head prefix=\"og: https://ogp.me/ns#\">\n        <title>Welcome to Reddit</title>\n        <meta name=\"vie"
+  },
+  "skool_biz": {
+    "status": 202,
+    "error": null,
+    "bytes": 2106,
+    "slug_like": 0,
+    "ok": false,
+    "preview": "<!DOCTYPE html> <html lang=\"en\"> <head>     <meta charset=\"utf-8\">     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">     <title></title>     <style>         "
+  },
+  "circle_home": {
+    "status": 200,
+    "bytes": 226407,
+    "hrefs": 91,
+    "sample_hrefs": [
+      "/_next/static/css/15408dd5545edeca.css",
+      "/_next/static/css/416341178c2c3c87.css",
+      "/_next/static/chunks/webpack-fe0c41172fbea352.js",
+      "https://www.googletagmanager.com/gtm.js?id=GTM-N38ZKCH",
+      "https://t.contentsquare.net/uxa/cc10c46f846fe.js",
+      "https://app.circle.so",
+      "https://app.circle.so",
+      "https://circle-compass-assets.circle.so/v0.0.189/fonts/InterVariable.woff2",
+      "https://circle-compass-assets.circle.so/v0.0.189/fonts/SFMonoRegular.woff2",
+      "https://circle-compass-assets.circle.so/v0.0.189/sprite.svg",
+      "https://discover.circle.so",
+      "/favicon.ico",
+      "/apple-icon.png?9827e2ead7e5701b",
+      "/",
+      "#magnifying-glass-md",
+      "#cross-sm",
+      "#chevron-left-md",
+      "/",
+      "/goals/learn-ai",
+      "/goals/start-and-scale-my-business"
+    ],
+    "api_urls": [],
+    "backend_paths": [],
+    "ok": true
+  },
+  "cc_collinfo": {
+    "status": 200,
+    "error": null,
+    "bytes": 34947,
+    "indexes": 127,
+    "latest": [
+      [
+        "CC-MAIN-2026-34",
+        "https://index.commoncrawl.org/CC-MAIN-2026-34-index"
+      ],
+      [
+        "CC-MAIN-2026-30",
+        "https://index.commoncrawl.org/CC-MAIN-2026-30-index"
+      ],
+      [
+        "CC-MAIN-2026-25",
+        "https://index.commoncrawl.org/CC-MAIN-2026-25-index"
+      ],
+      [
+        "CC-MAIN-2026-21",
+        "https://index.commoncrawl.org/CC-MAIN-2026-21-index"
+      ],
+      [
+        "CC-MAIN-2026-17",
+        "https://index.commoncrawl.org/CC-MAIN-2026-17-index"
+      ]
+    ],
+    "ok": true
+  },
+  "cc_skool_via_collinfo": {
+    "url": "https://index.commoncrawl.org/CC-MAIN-2026-34-index?url=*.skool.com/*&output=json&limit=10",
+    "status": 200,
+    "error": null,
+    "rows": 10,
+    "sample": [
+      "https://www.skool.com/0-to-100-doors-real-estate-8637/about?utm_source=skooldotcom&utm_medium=website&utm_campaign=user_profile_page",
+      "https://www.skool.com/0-to-code-hero-1008/about",
+      "https://www.skool.com/000-7778/about?ref=83b3466ec742489b9da238aca9f708a9",
+      "https://www.skool.com/0001-6936/about",
+      "https://www.skool.com/0001-6936/about?utm_source=skooldotcom&utm_medium=website&utm_campaign=user_profile_page"
+    ],
+    "ok": true
+  },
+  "hive_detail": {
+    "status": 200,
+    "bytes": 124186,
+    "invite_like": 2,
+    "sample": [
+      "https://www.skool.com/1-ecom-club-2410/about",
+      "https://www.skool.com/1-ecom-club-2410/about?ref=thehiveindex.com&amp;utm_source=thehiveindex.com"
+    ],
+    "ok": true
+  }
+}

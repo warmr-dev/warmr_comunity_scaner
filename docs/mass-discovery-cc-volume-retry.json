@@ -1,0 +1,30 @@
+{
+  "*.skool.com/*": {
+    "ok": true,
+    "rows": 200,
+    "hit_limit": true,
+    "sample": "https://www.skool.com/0-to-100-doors-real-estate-8637/about?utm_source=skooldotcom&utm_medium=website&utm_campaign=user_profile_page"
+  },
+  "facebook.com/groups/*": {
+    "ok": false,
+    "error": "HTTP Error 404: Not Found"
+  },
+  "linkedin.com/groups/*": {
+    "ok": false,
+    "error": "HTTP Error 502: Bad Gateway"
+  },
+  "reddit.com/r/*": {
+    "ok": false,
+    "error": "HTTP Error 502: Bad Gateway"
+  },
+  "chat.whatsapp.com/*": {
+    "ok": true,
+    "rows": 105,
+    "hit_limit": false,
+    "sample": "https://chat.whatsapp.com/robots.txt"
+  },
+  "*/categories.json": {
+    "ok": false,
+    "error": "HTTP Error 404: Not Found"
+  }
+}

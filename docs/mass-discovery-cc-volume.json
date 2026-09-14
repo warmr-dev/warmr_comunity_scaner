@@ -1,0 +1,152 @@
+{
+  "index": "https://index.commoncrawl.org/CC-MAIN-2026-34-index",
+  "limit_per_pattern": 200,
+  "patterns": {
+    "skool": {
+      "pattern": "*.skool.com/*",
+      "ok": false,
+      "error": "HTTP Error 503: Service Temporarily Unavailable"
+    },
+    "linkedin_groups": {
+      "pattern": "linkedin.com/groups/*",
+      "ok": false,
+      "error": "HTTP Error 503: Service Temporarily Unavailable"
+    },
+    "reddit": {
+      "pattern": "reddit.com/r/*",
+      "ok": false,
+      "error": "HTTP Error 404: Not Found"
+    },
+    "circle": {
+      "pattern": "*.circle.so/*",
+      "ok": true,
+      "status": 200,
+      "rows_returned": 200,
+      "unique_keys_in_sample": 16,
+      "hit_limit": true,
+      "sample_keys": [
+        "circle:2022-review",
+        "circle:2023-review",
+        "circle:2025-community-trends-event",
+        "circle:2025-community-trends-report",
+        "circle:academy",
+        "circle:affiliate-faqs",
+        "circle:ai",
+        "circle:ai-agents",
+        "circle:blog",
+        "circle:br",
+        "circle:brand",
+        "circle:build-a-community"
+      ],
+      "sample_urls": [
+        "https://circle.so/",
+        "https://circle.so/",
+        "https://circle.so/?",
+        "https://circle.so/",
+        "https://circle.so/"
+      ]
+    },
+    "whatsapp": {
+      "pattern": "chat.whatsapp.com/*",
+      "ok": false,
+      "error": "HTTP Error 503: Service Temporarily Unavailable"
+    },
+    "discourse_categories_json": {
+      "pattern": "*/categories.json",
+      "ok": false,
+      "error": "HTTP Error 503: Service Temporarily Unavailable"
+    },
+    "facebook_groups": {
+      "pattern": "facebook.com/groups/*",
+      "ok": false,
+      "error": "HTTP Error 404: Not Found"
+    },
+    "slack_invite": {
+      "pattern": "join.slack.com/t/*",
+      "ok": true,
+      "status": 200,
+      "rows_returned": 200,
+      "unique_keys_in_sample": 183,
+      "hit_limit": true,
+      "sample_keys": [
+        "slack:18xxgames",
+        "slack:1supplychain",
+        "slack:27regalos",
+        "slack:29kcommunity",
+        "slack:469wi20",
+        "slack:48forthefuture",
+        "slack:4new",
+        "slack:5g-mag",
+        "slack:767bryant",
+        "slack:a-hug",
+        "slack:a5-3ap4392",
+        "slack:aaeepublic"
+      ],
+      "sample_urls": [
+        "https://join.slack.com/t/18xxgames/shared_invite/zt-8ksy028m-CSZC~G5QtiFv60_jdqqulQ",
+        "https://join.slack.com/t/1supplychain/shared_invite/zt-7r7hm5sg-MXGSGuos6al4SrIIOMI6Kg",
+        "https://join.slack.com/t/27regalos/shared_invite/zt-p2vhk3dy-OBhJ~yqJo6zcZTqRqpQLBQ",
+        "https://join.slack.com/t/29kcommunity/shared_invite/zt-1k5t4jrcm-0hrT5iSwbmA~t7_IivQIyQ",
+        "https://join.slack.com/t/469wi20/shared_invite/enQtOTA5OTAzOTYwMDIwLWNIOGNhZjJiNjJjMGUwN2FhMGJIOGVhZDRhMTNhNWFIOTRkMGYzN2ZkMGQ1NGEyYzRmOWVjYzZkMDgzMGQ4MGI"
+      ]
+    },
+    "geneva": {
+      "pattern": "*.geneva.com/*",
+      "ok": true,
+      "status": 200,
+      "rows_returned": 71,
+      "unique_keys_in_sample": 53,
+      "hit_limit": false,
+      "sample_keys": [
+        "url:app.geneva.com/invite/0b2faef0-d78b-4a44-a6cd-e8ed794eb887",
+        "url:app.geneva.com/invite/7a7cec2c-7fe5-4498-a2f5-489b798b534d",
+        "url:app.geneva.com/invite/827cbbe1-628a-42ca-bfc6-c1935ba1507a",
+        "url:app.geneva.com/invite/a4eaa2fa-b758-403f-9876-ca9f254660aa",
+        "url:app.geneva.com/invite/c33dee4a-29a4-417f-8036-9b654a3b303f",
+        "url:app.geneva.com/invite/d06bca9d-e02f-4779-bae4-42cbcc5b4bbe",
+        "url:app.geneva.com/invite/eb81e976-3fa4-4b8e-8822-528606a5bf5f",
+        "url:app.geneva.com/robots.txt",
+        "url:assets.geneva.com",
+        "url:assets.geneva.com/robots.txt",
+        "url:geneva.com",
+        "url:geneva.com/blog/how-to-start-your-book-club"
+      ],
+      "sample_urls": [
+        "https://geneva.com/",
+        "http://www.geneva.com/",
+        "https://www.geneva.com/",
+        "https://www.geneva.com/?ref=makelanding.ai",
+        "https://www.geneva.com/?ref=platformingcommunity.com"
+      ]
+    },
+    "mighty": {
+      "pattern": "*.mightynetworks.com/*",
+      "ok": true,
+      "status": 200,
+      "rows_returned": 200,
+      "unique_keys_in_sample": 185,
+      "hit_limit": true,
+      "sample_keys": [
+        "url:mightynetworks.com",
+        "url:mightynetworks.com/500m-later-mighty-pro-event",
+        "url:mightynetworks.com/about",
+        "url:mightynetworks.com/accessibility",
+        "url:mightynetworks.com/ai",
+        "url:mightynetworks.com/analytics",
+        "url:mightynetworks.com/app/32052/spaces/5038358/posts/24910294",
+        "url:mightynetworks.com/best-virtual-event-platform",
+        "url:mightynetworks.com/blog-name-generator",
+        "url:mightynetworks.com/business-name-generator",
+        "url:mightynetworks.com/california-privacy-notice",
+        "url:mightynetworks.com/careers"
+      ],
+      "sample_urls": [
+        "https://www.mightynetworks.com/",
+        "https://www.mightynetworks.com/",
+        "https://www.mightynetworks.com/",
+        "https://www.mightynetworks.com/",
+        "https://www.mightynetworks.com/500m-later-mighty-pro-event"
+      ]
+    }
+  }
+}
