@@ -200,6 +200,21 @@
     .badge.high { color: var(--green); background: #ecf8f0; }
     .empty { text-align: center; padding: 40px; color: var(--muted); }
     .footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 8px 4px; }
+    .shimmer {
+      display: block;
+      height: 12px;
+      border-radius: 6px;
+      background: linear-gradient(90deg, #efece8 20%, #e3dfda 40%, #efece8 60%);
+      background-size: 200% 100%;
+      animation: shimmer 1.3s ease-in-out infinite;
+    }
+    .shimmer.num { width: 84px; height: 28px; margin-top: 10px; border-radius: 8px; }
+    .shimmer.subline { width: 52%; height: 10px; margin-top: 8px; }
+    .shimmer.nav-shimmer { height: 34px; margin: 2px 0; border-radius: 10px; }
+    tr.sk:hover { background: transparent; }
+    .btn:disabled { opacity: .7; cursor: default; }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+    @media (prefers-reduced-motion: reduce) { .shimmer { animation: none; background: #efece8; } }
     @media (max-width: 980px) {
       .app { grid-template-columns: 1fr; }
       .sidebar { min-height: auto; position: static; }
@@ -237,7 +252,13 @@
         Communities
       </button>
       <div class="nav-label">Platforms</div>
-      <div id="platforms"></div>
+      <div id="platforms">
+        <span class="shimmer nav-shimmer" style="width:78%"></span>
+        <span class="shimmer nav-shimmer" style="width:62%"></span>
+        <span class="shimmer nav-shimmer" style="width:84%"></span>
+        <span class="shimmer nav-shimmer" style="width:54%"></span>
+        <span class="shimmer nav-shimmer" style="width:70%"></span>
+      </div>
     </nav>
     <div class="account">
       <div class="avatar" id="avatar">W</div>
@@ -257,28 +278,28 @@
         <h1>Communities</h1>
         <div class="sub">Live read-only view of scanned communities.</div>
       </div>
-      <button class="btn secondary" type="button" onclick="loadAll()">Refresh</button>
+      <button class="btn secondary" id="refreshBtn" type="button" onclick="loadAll()">Refresh</button>
     </header>
 
     <section class="cards">
       <div class="card">
         <div class="card-top"><span class="card-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Total communities</div>
-        <div class="number" id="total">—</div>
+        <div class="number" id="total"><span class="shimmer num"></span></div>
         <div class="hint">Rows in community_scanner</div>
       </div>
       <div class="card">
         <div class="card-top"><span class="card-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span> Free or unknown</div>
-        <div class="number" id="free">—</div>
+        <div class="number" id="free"><span class="shimmer num"></span></div>
         <div class="hint">No price recorded</div>
       </div>
       <div class="card">
         <div class="card-top"><span class="card-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span> Platforms</div>
-        <div class="number" id="platformCount">—</div>
+        <div class="number" id="platformCount"><span class="shimmer num"></span></div>
         <div class="hint">Distinct sources</div>
       </div>
       <div class="card">
         <div class="card-top"><span class="card-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg></span> Current filter</div>
-        <div class="number" id="filterLabel">All</div>
+        <div class="number" id="filterLabel"><span class="shimmer num"></span></div>
         <div class="hint">Platform filter</div>
       </div>
     </section>
@@ -292,11 +313,18 @@
       <div class="table-wrap">
         <table>
           <thead><tr><th>Community</th><th>Platform</th><th>Niche</th><th>Access</th><th>Members</th><th>Price</th><th>Score</th></tr></thead>
-          <tbody id="rows"></tbody>
+          <tbody id="rows">
+            <tr class="sk"><td><span class="shimmer" style="width:62%"></span><span class="shimmer subline"></span></td><td><span class="shimmer" style="width:48%"></span></td><td><span class="shimmer" style="width:40%"></span></td><td><span class="shimmer" style="width:36%"></span></td><td><span class="shimmer" style="width:28%"></span></td><td><span class="shimmer" style="width:44%"></span></td><td><span class="shimmer" style="width:32%"></span></td></tr>
+            <tr class="sk"><td><span class="shimmer" style="width:54%"></span><span class="shimmer subline"></span></td><td><span class="shimmer" style="width:42%"></span></td><td><span class="shimmer" style="width:36%"></span></td><td><span class="shimmer" style="width:30%"></span></td><td><span class="shimmer" style="width:24%"></span></td><td><span class="shimmer" style="width:40%"></span></td><td><span class="shimmer" style="width:28%"></span></td></tr>
+            <tr class="sk"><td><span class="shimmer" style="width:70%"></span><span class="shimmer subline"></span></td><td><span class="shimmer" style="width:50%"></span></td><td><span class="shimmer" style="width:44%"></span></td><td><span class="shimmer" style="width:32%"></span></td><td><span class="shimmer" style="width:26%"></span></td><td><span class="shimmer" style="width:38%"></span></td><td><span class="shimmer" style="width:30%"></span></td></tr>
+            <tr class="sk"><td><span class="shimmer" style="width:48%"></span><span class="shimmer subline"></span></td><td><span class="shimmer" style="width:40%"></span></td><td><span class="shimmer" style="width:34%"></span></td><td><span class="shimmer" style="width:28%"></span></td><td><span class="shimmer" style="width:22%"></span></td><td><span class="shimmer" style="width:36%"></span></td><td><span class="shimmer" style="width:26%"></span></td></tr>
+            <tr class="sk"><td><span class="shimmer" style="width:66%"></span><span class="shimmer subline"></span></td><td><span class="shimmer" style="width:46%"></span></td><td><span class="shimmer" style="width:38%"></span></td><td><span class="shimmer" style="width:30%"></span></td><td><span class="shimmer" style="width:24%"></span></td><td><span class="shimmer" style="width:42%"></span></td><td><span class="shimmer" style="width:28%"></span></td></tr>
+            <tr class="sk"><td><span class="shimmer" style="width:58%"></span><span class="shimmer subline"></span></td><td><span class="shimmer" style="width:44%"></span></td><td><span class="shimmer" style="width:32%"></span></td><td><span class="shimmer" style="width:26%"></span></td><td><span class="shimmer" style="width:20%"></span></td><td><span class="shimmer" style="width:34%"></span></td><td><span class="shimmer" style="width:24%"></span></td></tr>
+          </tbody>
         </table>
       </div>
       <div class="footer">
-        <span class="muted" id="shown"></span>
+        <span class="muted" id="shown">Loading communities…</span>
         <div>
           <button class="btn secondary" type="button" onclick="page(-1)">Previous</button>
           <button class="btn secondary" type="button" onclick="page(1)">Next</button>
@@ -309,9 +337,39 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
   let supabaseClient;
-  let selectedPlatform = "", offset = 0, timer, loaded = false;
+  let selectedPlatform = "", offset = 0, timer, loaded = false, requestId = 0;
 
   const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+  const shimmer = (cls, width) => `<span class="shimmer ${cls || ""}" ${width ? `style="width:${width}"` : ""}></span>`;
+  function skeletonRows() {
+    const widths = ["68%", "46%", "40%", "34%", "28%", "42%", "30%"];
+    return Array.from({length: 8}, (_, row) => `<tr class="sk">${widths.map((width, col) => `<td>${shimmer("", `${parseInt(width, 10) - (row % 3) * 6}%`)}${col === 0 ? shimmer("subline") : ""}</td>`).join("")}</tr>`).join("");
+  }
+  function setLoading(part) {
+    if (part === "all") {
+      for (const id of ["total", "free", "platformCount", "filterLabel"]) {
+        document.querySelector("#" + id).innerHTML = shimmer("num");
+      }
+      document.querySelector("#platforms").innerHTML = [78, 62, 84, 54, 70].map(width => shimmer("nav-shimmer", width + "%")).join("");
+    }
+    document.querySelector("#rows").innerHTML = skeletonRows();
+    document.querySelector("#shown").textContent = "Loading communities…";
+    const refresh = document.querySelector("#refreshBtn");
+    refresh.textContent = "Loading…";
+    refresh.disabled = true;
+  }
+  function clearLoadingChrome() {
+    const refresh = document.querySelector("#refreshBtn");
+    refresh.textContent = "Refresh";
+    refresh.disabled = false;
+  }
+  function showLoadError() {
+    for (const id of ["total", "free", "platformCount"]) document.querySelector("#" + id).textContent = "—";
+    document.querySelector("#filterLabel").textContent = selectedPlatform || "All";
+    document.querySelector("#platforms").innerHTML = "";
+    document.querySelector("#rows").innerHTML = `<tr><td class="empty" colspan="7">Could not load communities. Try Refresh.</td></tr>`;
+    document.querySelector("#shown").textContent = "Could not load data";
+  }
 
   function setAuth(mode, session) {
     document.body.classList.remove("booting", "guest", "authenticated");
@@ -354,12 +412,23 @@
     document.querySelector("#rows").innerHTML = data.items.length ? data.items.map(item => `<tr><td><strong>${esc(item.name || "Unnamed community")}</strong><br><a class="link" href="${esc(item.join_url || item.website)}" target="_blank" rel="noreferrer">${esc(item.join_url || item.website)}</a></td><td><span class="badge">${esc(item.platform)}</span></td><td>${esc(item.niche || "—")}</td><td>${esc(item.access_status || "—")}</td><td>${item.size_members?.toLocaleString() || "—"}</td><td>${esc(item.price_text || (item.price_amount ? `${item.price_amount} ${item.currency || ""}` : "Free / unknown"))}</td><td><span class="badge ${item.value_tier === "high" ? "high" : ""}">${item.value_score ?? 0} · ${esc(item.value_tier)}</span></td></tr>`).join("") : `<tr><td class="empty" colspan="7">No communities found</td></tr>`;
   }
 
-  function choosePlatform(value) { selectedPlatform = value; offset = 0; loadAll(); }
-  function page(delta) { offset = Math.max(0, offset + delta * 50); loadCommunities(); }
-  function debouncedLoad() { clearTimeout(timer); timer = setTimeout(() => { offset = 0; loadCommunities(); }, 250); }
-  async function loadAll() {
-    try { await loadStats(); await loadCommunities(); }
-    catch { document.querySelector("#rows").innerHTML = `<tr><td class="empty" colspan="7">Could not connect to the database API</td></tr>`; }
+  function choosePlatform(value) { selectedPlatform = value; offset = 0; runLoad("table"); }
+  function page(delta) { offset = Math.max(0, offset + delta * 50); runLoad("table"); }
+  function debouncedLoad() { clearTimeout(timer); timer = setTimeout(() => { offset = 0; runLoad("table"); }, 250); }
+  async function loadAll() { return runLoad("all"); }
+  async function runLoad(part) {
+    const id = ++requestId;
+    setLoading(part);
+    try {
+      if (part === "all") await loadStats();
+      if (id !== requestId) return;
+      await loadCommunities();
+    } catch {
+      if (id !== requestId) return;
+      showLoadError();
+    } finally {
+      if (id === requestId) clearLoadingChrome();
+    }
   }
 
   async function login(event) {
